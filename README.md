@@ -2,12 +2,21 @@
 
 [![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://isocpp.org/)
-[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-5.x%20%7C%206.x-red.svg)](https://docs.espressif.com/projects/esp-idf/)
+[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-6.1%20on%20ESP32--S3-red.svg)](https://docs.espressif.com/projects/esp-idf/)
 [![Uber H3](https://img.shields.io/badge/Uber%20H3-v4.5.0-000000.svg)](https://github.com/uber/h3/releases/tag/v4.5.0)
 
 **Privacy-preserving Uber H3 v4.5.0 spatial indexing, monotonic cell coarsening, integer $10^{-7}$ degree centroids, and ISO 3166-1 alpha-2 country validation for ESP-IDF and embedded C/C++17.**
 
 Developed and maintained by **[Walkthru.Earth](https://walkthru.earth)** for edge environmental telemetry, air-quality loggers, and privacy-first IoT nodes.
+
+## Hardware Verification Status
+
+| Target | ESP-IDF | Status |
+| :--- | :--- | :--- |
+| ESP32-S3 | 6.1 | Hardware verified |
+| ESP32-C3, ESP32-C6, ESP32-P4 | 6.1 | Pending hardware verification |
+
+The component declares no `targets` list, so it builds for any ESP-IDF target, but only ESP32-S3 on ESP-IDF 6.1 has been run on real hardware. CI builds `examples/basic` for ESP32-S3 with the `espressif/idf:v6.1` container and runs the host tests in Debug and Release with ASan and UBSan.
 
 ---
 
@@ -76,16 +85,35 @@ sequenceDiagram
 
 ### 1. ESP-IDF Integration
 
-Add `embedded-h3-location` to your component's `idf_component.yml` or place it in `components/location`:
+Add `embedded-h3-location` as a git dependency in your component's `idf_component.yml`. For git dependencies the [IDF Component Manager](https://docs.espressif.com/projects/idf-component-manager/en/latest/reference/manifest_file.html) treats `version` as a git reference (tag, branch or commit), not a semantic version range, so pin the release tag:
 
 ```yaml
 dependencies:
+  idf: ">=6.1"
   walkthru-earth/embedded-h3-location:
     git: "https://github.com/walkthru-earth/embedded-h3-location.git"
-    version: "^1.0.0"
+    version: "v1.0.0"
 ```
 
+Alternatively copy or submodule the repository into `components/embedded-h3-location`. A minimal buildable project lives in [`examples/basic`](examples/basic).
+
 ### 2. Standalone CMake Integration
+
+With CMake `FetchContent`:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(
+  embedded_h3_location
+  GIT_REPOSITORY https://github.com/walkthru-earth/embedded-h3-location.git
+  GIT_TAG v1.0.0
+)
+FetchContent_MakeAvailable(embedded_h3_location)
+
+target_link_libraries(my_app PRIVATE walkthru_earth::embedded_h3_location)
+```
+
+Or with a local checkout:
 
 ```cmake
 add_subdirectory(embedded-h3-location)
@@ -96,7 +124,6 @@ target_link_libraries(my_app PRIVATE walkthru_earth::embedded_h3_location)
 
 ```cpp
 #include "aq_location.h"
-#include <cassert>
 #include <cstdio>
 
 int main() {
@@ -104,24 +131,22 @@ int main() {
 
   // 1. Index raw coordinates at fine resolution (e.g. res 9)
   Cell fine = 0;
-  assert(from_degrees(37.7759387, -122.4179506, 9, fine));
+  if (!from_degrees(37.7759387, -122.4179506, 9, fine)) return 1;
 
   // 2. Coarsen to privacy cap (default res 5) before saving to NVS or flash
   Cell published = 0;
-  assert(coarsen(fine, kDefaultResolution, published));
-  assert(resolution(published) == 5);
+  if (!coarsen(fine, kDefaultResolution, published)) return 1;
 
   // 3. Format canonical 15-character lowercase hex string
   char hex[kCellTextBytes]{};
-  assert(format_cell(published, hex, sizeof(hex)));
+  if (!format_cell(published, hex, sizeof(hex))) return 1;
 
   // 4. Derive approximate cell centroid in 1e-7 degrees for telemetry columns
   std::int64_t lat_e7 = 0, lon_e7 = 0;
-  assert(center_e7(published, lat_e7, lon_e7));
+  if (!center_e7(published, lat_e7, lon_e7)) return 1;
 
   // 5. Validate owner-declared ISO 3166-1 alpha-2 country code
-  assert(valid_country("US"));
-  assert(!valid_country("XX"));
+  if (!valid_country("US") || valid_country("XX")) return 1;
 
   std::printf("cell=%s res=%d center=(%lld, %lld)\n",
               hex, resolution(published),
@@ -157,24 +182,40 @@ int main() {
 To build and verify with CMake and `clang++` sanitizers (`AddressSanitizer` + `UndefinedBehaviorSanitizer`):
 
 ```bash
-cmake -B build -DBUILD_TESTING=ON -DENABLE_SANITIZERS=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
+# Debug and Release (-DNDEBUG) both run every check, the tests do not rely on assert().
+for type in Debug Release; do
+  cmake -B build-$type -DCMAKE_BUILD_TYPE=$type -DBUILD_TESTING=ON -DENABLE_SANITIZERS=ON
+  cmake --build build-$type
+  ctest --test-dir build-$type --output-on-failure
+done
 
 # Direct clang++ sanitizer verification against the built static library:
 clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all \
-  -Isrc tests/test_h3_location.cpp build/libembedded_h3_location.a \
-  -o build/test_h3_sanitized && ./build/test_h3_sanitized
+  -Isrc tests/test_h3_location.cpp build-Debug/libembedded_h3_location.a \
+  -o build-Debug/test_h3_sanitized && ./build-Debug/test_h3_sanitized
 ```
 
 ---
 
 ## License & Attribution (CC-BY-4.0)
 
-This library is licensed under the **Creative Commons Attribution 4.0 International Public License (CC-BY-4.0)** — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE) for full details.
+Walkthru.Earth original code in this repository (`src/`, `tests/`, `examples/`, build files and documentation) is licensed under the **Creative Commons Attribution 4.0 International Public License (CC-BY-4.0)**. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). The CC-BY-4.0 license does not cover the third-party code listed below, which keeps its own license.
 
 > **Attribution Requirement**: Any application, firmware image, hardware product, dataset, or documentation that uses or incorporates `embedded-h3-location` must include clear, visible attribution to **Walkthru.Earth** ([https://walkthru.earth](https://walkthru.earth)), for example:
 >
 > *"Spatial indexing and privacy coarsening powered by [Walkthru.Earth](https://walkthru.earth) (`walkthru-earth/embedded-h3-location`), licensed under CC-BY-4.0."*
 
-Vendored upstream Uber H3 v4.5.0 sources under `vendor/h3/` remain licensed under the **Apache License, Version 2.0** (`Copyright 2017-2021 Uber Technologies, Inc.`).
+The component manifest declares `license: "CC-BY-4.0 AND Apache-2.0"` to reflect both parts.
+
+## Third-party notices
+
+| Component | Location | License | Copyright |
+| :--- | :--- | :--- | :--- |
+| [Uber H3](https://github.com/uber/h3) v4.5.0 (commit `1b536c34225191ba24a75a840f634d4a48c3b206`), unmodified | `vendor/h3/` | Apache-2.0, see [`vendor/h3/LICENSE`](vendor/h3/LICENSE) and [`vendor/h3/NOTICE`](vendor/h3/NOTICE) | Copyright 2017-2021 Uber Technologies, Inc. |
+
+Firmware or binaries that link this library include compiled H3 code and must carry the Apache-2.0 license text and the H3 `NOTICE` file in addition to the Walkthru.Earth attribution.
+
+Other origins credited here, none of which is copied code:
+
+- The ISO 3166-1 alpha-2 code table in `src/iso_alpha2.h` is factual data (249 assigned codes, snapshot `2026-10-09`) compiled from the UN M49 ISO-alpha2 table plus the ISO assignment for `TW` (sources listed in the header).
+- Test fixtures in `tests/` reuse published example values from the official H3 documentation (`latLngToCell`, `cellToLatLng` and quick-start examples).
