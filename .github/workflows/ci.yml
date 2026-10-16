@@ -3,17 +3,53 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  host-tests:
+    name: Host tests (${{ matrix.build_type }}, ASan + UBSan)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
     steps:
       - uses: actions/checkout@v4
-      - name: Configure CMake with Sanitizers
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DENABLE_SANITIZERS=ON
-      - name: Build Library and Tests
-        run: cmake --build build
-      - name: Run CTest (ASan + UBSan)
+        with:
+          persist-credentials: false
+      - name: Configure
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DBUILD_TESTING=ON
+          -DENABLE_SANITIZERS=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  esp-idf-build:
+    name: ESP-IDF v6.1 build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.1
+    strategy:
+      fail-fast: false
+      matrix:
+        # Only ESP32-S3 is hardware verified. Other targets are pending.
+        target: [esp32s3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build examples/basic
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd examples/basic
+          idf.py set-target ${{ matrix.target }}
+          idf.py build
