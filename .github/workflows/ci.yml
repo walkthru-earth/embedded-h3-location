@@ -20,6 +20,8 @@ jobs:
         build_type: [Debug, Release]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Configure
         run: >
           cmake -B build
@@ -42,6 +44,8 @@ jobs:
         target: [esp32s3]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Build examples/basic
         shell: bash
         run: |

@@ -1,13 +1,14 @@
 #include "aq_location.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 #include <limits>
 
-// Always-evaluated check. Unlike CHECK(), it survives -DNDEBUG, so Release
+// Always-evaluated check. Unlike assert(), it survives -DNDEBUG, so Release
 // builds still run every API call under test and fail loudly on a mismatch.
 #define CHECK(expr)                                                            \
   do {                                                                         \
