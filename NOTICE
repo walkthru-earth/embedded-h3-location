@@ -1,0 +1,30 @@
+embedded-h3-location
+Copyright (c) 2025-2026 Walkthru.Earth (hi@walkthru.earth)
+https://walkthru.earth
+
+This work is licensed under the Creative Commons Attribution 4.0 International
+Public License (CC-BY-4.0). Any application, firmware distribution, derivative
+work, dataset, or documentation using this library must provide clear attribution
+to Walkthru.Earth (https://walkthru.earth).
+
+-------------------------------------------------------------------------------
+Third-Party Software Notices
+-------------------------------------------------------------------------------
+
+This repository includes unmodified source files from the official Uber H3 C
+library (v4.5.0, commit 1b536c34225191ba24a75a840f634d4a48c3b206) under
+`vendor/h3/`, verified by SHA-256 checksums in `vendor/h3/manifest.json`:
+
+Copyright 2017-2021 Uber Technologies, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.

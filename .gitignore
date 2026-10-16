@@ -1,0 +1,7 @@
+build/
+cmake-build-*/
+.DS_Store
+*.o
+*.a
+*.dSYM/
+test_h3_location
