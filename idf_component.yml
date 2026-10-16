@@ -2,20 +2,30 @@ version: "1.0.0"
 description: "Privacy-preserving Uber H3 v4.5.0 spatial indexing, cell coarsening, and ISO-3166 country validation for ESP-IDF and embedded C/C++17"
 url: "https://github.com/walkthru-earth/embedded-h3-location"
 repository: "https://github.com/walkthru-earth/embedded-h3-location.git"
-license: "CC-BY-4.0"
+documentation: "https://github.com/walkthru-earth/embedded-h3-location#readme"
+issues: "https://github.com/walkthru-earth/embedded-h3-location/issues"
+# Walkthru.Earth original code is CC-BY-4.0. Vendored Uber H3 under vendor/h3 is Apache-2.0.
+license: "CC-BY-4.0 AND Apache-2.0"
 maintainers:
   - "Walkthru.Earth <hi@walkthru.earth>"
 tags:
-  - h3
+  - uber-h3
   - geospatial
   - location
   - privacy
   - iso3166
   - esp-idf
+# No targets list on purpose. Hardware verified on ESP32-S3 only, other chips
+# are pending hardware verification but are not blocked.
 dependencies:
-  idf: ">=5.1"
+  idf: ">=6.1"
 files:
   use_gitignore: true
   exclude:
     - "build/**"
     - ".github/**"
+    - "examples/**/build/**"
+    - "examples/**/managed_components/**"
+    - "examples/**/sdkconfig"
+    - "examples/**/sdkconfig.old"
+    - "examples/**/dependencies.lock"

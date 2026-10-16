@@ -5,3 +5,7 @@ cmake-build-*/
 *.a
 *.dSYM/
 test_h3_location
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock

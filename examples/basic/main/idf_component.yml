@@ -1,0 +1,6 @@
+dependencies:
+  idf: ">=6.1"
+  walkthru-earth/embedded-h3-location:
+    # Use the checkout this example lives in. Downstream projects use the
+    # git form shown in the README instead.
+    override_path: "../../../"
