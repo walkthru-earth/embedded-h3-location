@@ -1,0 +1,20 @@
+# clangd setup. Keys from https://clangd.llvm.org/config
+#
+# Run `cmake --preset dev` once. It writes build/compile_commands.json with the
+# real flags and the generated h3api.h, and clangd reads it from here.
+CompileFlags:
+  CompilationDatabase: build
+---
+# Fallback before any configure. clangd runs these files as `clang <file>` from
+# the file's own directory, so the include paths are relative to it. The
+# public header and the private headers resolve. Files that include h3api.h
+# need the configure step, because CMake generates that header.
+If:
+  PathMatch: include/embedded_h3/.*\.h
+CompileFlags:
+  Add: [-xc++, -std=c++23, -I../../include, -I../../src]
+---
+If:
+  PathMatch: (src|tests)/.*\.(h|cpp)
+CompileFlags:
+  Add: [-xc++, -std=c++23, -I../include, -I../src]

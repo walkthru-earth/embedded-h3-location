@@ -1,10 +1,14 @@
+# Host builds. build/ holds the compile_commands.json that .clangd reads.
 build/
+build-*/
 cmake-build-*/
+.cache/
 .DS_Store
 *.o
 *.a
 *.dSYM/
-test_h3_location
+test_location
+# ESP-IDF example
 sdkconfig
 sdkconfig.old
 managed_components/
