@@ -73,7 +73,67 @@ if(EMBEDDED_H3_LOCATION_MAP_PATHS)
     list(REMOVE_DUPLICATES embedded_h3_location_path_options)
 endif()
 
-set(embedded_h3_location_sources "src/location.cpp" ${h3_sources})
+set(embedded_h3_location_sources "src/location.cpp" "src/multipolygon.cpp"
+    ${h3_sources})
+
+# H3 allocates only in cells_to_multipolygon, through H3_MEMORY (vendor H3
+# alloc.h). With H3_ALLOC_PREFIX unset that is plain malloc, calloc, realloc
+# and free. A prefix such as my_h3_ makes H3 call my_h3_malloc, my_h3_calloc,
+# my_h3_realloc and my_h3_free, which the consumer defines with C linkage and
+# libc semantics. alloc.h joins the names with TJOIN, which h3api.h defines
+# only under H3_PREFIX, so H3_PREFIX is set empty, as the upstream H3 v4.5.0
+# CMakeLists.txt always does. Exported names stay unprefixed. Compile
+# definitions only, no vendored byte changes. ESP-IDF builds read the prefix
+# from Kconfig, host builds from the EMBEDDED_H3_LOCATION_ALLOC_PREFIX cache
+# variable.
+function(embedded_h3_location_alloc_prefix target prefix)
+    if(prefix STREQUAL "")
+        return()
+    endif()
+    if(NOT prefix MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+        message(FATAL_ERROR "H3 allocator prefix is not a C identifier prefix: '${prefix}'")
+    endif()
+    target_compile_definitions(${target} PRIVATE H3_PREFIX= H3_ALLOC_PREFIX=${prefix})
+endfunction()
+
+# Settings both the host and the ESP-IDF library take.
+function(embedded_h3_location_common target)
+    set_target_properties(${target} PROPERTIES
+        CXX_STANDARD 23
+        CXX_STANDARD_REQUIRED ON)
+    # Section GC drops the H3 functions this library does not call.
+    target_compile_options(${target}
+        PUBLIC ${embedded_h3_location_public_path_options}
+        PRIVATE -ffunction-sections -fdata-sections ${embedded_h3_location_path_options})
+endfunction()
+
+# A host static library of this component. The tests build a second one with
+# their own allocator prefix.
+function(embedded_h3_location_host_library target prefix)
+    add_library(${target} STATIC ${embedded_h3_location_sources})
+    target_include_directories(${target}
+        PUBLIC
+            "${CMAKE_CURRENT_LIST_DIR}/include"
+        PRIVATE
+            "${CMAKE_CURRENT_LIST_DIR}/src"
+            "${h3_root}/h3lib/include"
+            "${CMAKE_CURRENT_BINARY_DIR}/include"
+    )
+    # The public header needs std::expected, so consumers need C++23 too.
+    target_compile_features(${target} PUBLIC cxx_std_23)
+    # Prove the library builds the way it runs on device.
+    target_compile_options(${target} PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti;-Wall;-Wextra;-Wpedantic>")
+    if(ENABLE_SANITIZERS)
+        target_compile_options(${target} PUBLIC -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
+        target_link_options(${target} PUBLIC -fsanitize=address,undefined -fno-sanitize-recover=all)
+    endif()
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(${target} PRIVATE m)
+    endif()
+    embedded_h3_location_common(${target})
+    embedded_h3_location_alloc_prefix(${target} "${prefix}")
+endfunction()
 
 if(ESP_PLATFORM)
     idf_component_register(
@@ -81,7 +141,11 @@ if(ESP_PLATFORM)
         INCLUDE_DIRS "include"
         PRIV_INCLUDE_DIRS "src" "${h3_root}/h3lib/include" "${CMAKE_CURRENT_BINARY_DIR}/include"
     )
-    set(embedded_h3_location_target ${COMPONENT_LIB})
+    # The prefix comes from this component's Kconfig. CONFIG_ values exist
+    # here, after idf_component_register, but not during early expansion.
+    embedded_h3_location_alloc_prefix(${COMPONENT_LIB}
+        "${CONFIG_EMBEDDED_H3_LOCATION_ALLOC_PREFIX}")
+    embedded_h3_location_common(${COMPONENT_LIB})
     # ESP-IDF adds its own -std=gnu++26 (v6.1) as a build wide compile option,
     # which lands after the flag that CXX_STANDARD writes. This option comes
     # last, so an SDK default change cannot move the dialect. It applies to
@@ -97,53 +161,46 @@ else()
 
     option(ENABLE_SANITIZERS "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
-    add_library(embedded_h3_location STATIC ${embedded_h3_location_sources})
+    set(EMBEDDED_H3_LOCATION_ALLOC_PREFIX "" CACHE STRING
+        "Prefix for the malloc, calloc, realloc and free that H3 calls. Empty means plain malloc")
+    embedded_h3_location_host_library(embedded_h3_location
+        "${EMBEDDED_H3_LOCATION_ALLOC_PREFIX}")
     add_library(walkthru_earth::embedded_h3_location ALIAS embedded_h3_location)
-    set(embedded_h3_location_target embedded_h3_location)
-
-    target_include_directories(embedded_h3_location
-        PUBLIC
-            "${CMAKE_CURRENT_LIST_DIR}/include"
-        PRIVATE
-            "${CMAKE_CURRENT_LIST_DIR}/src"
-            "${h3_root}/h3lib/include"
-            "${CMAKE_CURRENT_BINARY_DIR}/include"
-    )
-    # The public header needs std::expected, so consumers need C++23 too.
-    target_compile_features(embedded_h3_location PUBLIC cxx_std_23)
-    # Prove the library builds the way it runs on device.
-    target_compile_options(embedded_h3_location PRIVATE
-        "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti;-Wall;-Wextra;-Wpedantic>")
-    if(ENABLE_SANITIZERS)
-        target_compile_options(embedded_h3_location PUBLIC -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
-        target_link_options(embedded_h3_location PUBLIC -fsanitize=address,undefined -fno-sanitize-recover=all)
-    endif()
-    if(UNIX AND NOT APPLE)
-        target_link_libraries(embedded_h3_location PRIVATE m)
-    endif()
 endif()
-
-set_target_properties(${embedded_h3_location_target} PROPERTIES
-    CXX_STANDARD 23
-    CXX_STANDARD_REQUIRED ON)
-# Section GC drops the H3 functions this library does not call.
-target_compile_options(${embedded_h3_location_target}
-    PUBLIC ${embedded_h3_location_public_path_options}
-    PRIVATE -ffunction-sections -fdata-sections ${embedded_h3_location_path_options})
 
 if(NOT ESP_PLATFORM AND CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(CTest)
     if(BUILD_TESTING)
-        target_compile_options(embedded_h3_location PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Werror>")
-        add_executable(test_location "tests/test_location.cpp")
-        target_link_libraries(test_location PRIVATE embedded_h3_location)
-        # The tests reach the private error mapping and H3's own header.
-        target_include_directories(test_location PRIVATE
-            "${CMAKE_CURRENT_LIST_DIR}/src" "${CMAKE_CURRENT_BINARY_DIR}/include")
-        set_target_properties(test_location PROPERTIES
-            CXX_STANDARD 23
-            CXX_STANDARD_REQUIRED ON)
-        target_compile_options(test_location PRIVATE -Wall -Wextra -Wpedantic -Werror)
-        add_test(NAME test_location COMMAND test_location)
+        # test_multipolygon_malloc needs the default library to call plain
+        # malloc, and test_multipolygon brings its own prefix.
+        if(NOT EMBEDDED_H3_LOCATION_ALLOC_PREFIX STREQUAL "")
+            message(FATAL_ERROR "The tests need EMBEDDED_H3_LOCATION_ALLOC_PREFIX empty")
+        endif()
+        # The same sources with the prefix eh3l_test_, so the counting
+        # allocator in tests/test_multipolygon.cpp sees every H3 allocation.
+        embedded_h3_location_host_library(embedded_h3_location_counted eh3l_test_)
+        foreach(library IN ITEMS embedded_h3_location embedded_h3_location_counted)
+            target_compile_options(${library} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Werror>")
+        endforeach()
+        function(embedded_h3_location_test name source library)
+            add_executable(${name} "${source}")
+            target_link_libraries(${name} PRIVATE ${library})
+            # The tests reach private helpers and H3's own header.
+            target_include_directories(${name} PRIVATE
+                "${CMAKE_CURRENT_LIST_DIR}/src" "${CMAKE_CURRENT_BINARY_DIR}/include")
+            set_target_properties(${name} PROPERTIES
+                CXX_STANDARD 23
+                CXX_STANDARD_REQUIRED ON)
+            target_compile_options(${name} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+            add_test(NAME ${name} COMMAND ${name})
+        endfunction()
+        embedded_h3_location_test(test_location "tests/test_location.cpp"
+            embedded_h3_location)
+        embedded_h3_location_test(test_multipolygon "tests/test_multipolygon.cpp"
+            embedded_h3_location_counted)
+        target_compile_definitions(test_multipolygon PRIVATE
+            EMBEDDED_H3_LOCATION_TEST_COUNTING=1)
+        embedded_h3_location_test(test_multipolygon_malloc
+            "tests/test_multipolygon.cpp" embedded_h3_location)
     endif()
 endif()

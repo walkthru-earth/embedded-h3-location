@@ -14,11 +14,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <span>
 #include <string_view>
 
-// Stateless helpers around the official Uber H3 C library. They hold no state,
-// never allocate and never throw. Persist only the output of coarsen() and
+// Stateless helpers around the official Uber H3 C library. They hold no state
+// and never throw. Only cells_to_multipolygon allocates, inside H3, and it
+// frees all of it before it returns. Persist only the output of coarsen() and
 // derive public coordinates from that cell. A cell center is not the original
 // position, and H3 is not a country lookup.
 namespace embedded_h3::location {
@@ -38,8 +40,16 @@ enum class [[nodiscard]] Error : std::uint8_t {
   OutOfRange,        // latitude outside -90..90 or longitude outside -180..180
   NonFinite,         // latitude or longitude is NaN or infinite
   InvalidText,       // cell text is not exactly 15 hex digits
-  H3Failure,         // H3 rejected input this library had already checked
+  H3Failure,         // H3 rejected checked input or broke its output contract
   TooCoarse,         // cell is coarser than the resolution parent_at asks for
+  NoCells,           // cells_to_multipolygon got an empty cell list
+  MixedResolution,   // the cells differ in resolution (H3 E_RES_MISMATCH)
+  DuplicateCell,     // a cell is listed twice (H3 E_DUPLICATE_INPUT)
+  TooManyCells,      // a size would overflow (H3 E_MEMORY_BOUNDS or the capacity)
+  OutOfMemory,       // an H3 allocation failed (H3 E_MEMORY_ALLOC)
+  PointBufferFull,   // the caller's point buffer is too small
+  RingBufferFull,    // the caller's ring buffer is too small
+  PolygonBufferFull, // the caller's polygon buffer is too small
 };
 
 // Stable lowercase name for logs, such as "invalid_cell". Static storage,
@@ -106,5 +116,95 @@ from_degrees(double latitude, double longitude, int resolution) noexcept;
 // exactly two characters. The country is owner declared and never derived from
 // a cell. Empty input is not a valid code.
 [[nodiscard]] bool valid_country(std::string_view country) noexcept;
+
+// ---- Cells to multipolygon ----
+//
+// The outline of a set of cells, the union of the cells, as GeoJSON style
+// polygons written into buffers the caller owns. Coordinates are degrees,
+// longitude first, converted as (radians * 180) / pi in that order, which is
+// how h3-js 4.5.0 converts. Each ring is closed, its last point equal to its
+// first. Every polygon has its outer ring first, then its holes. Outer rings
+// run counterclockwise and holes clockwise, and polygons come largest outer
+// ring first, all as H3 4.5.0 returns them.
+
+// Longitude and latitude in degrees.
+struct LngLat {
+  double longitude;
+  double latitude;
+};
+
+// Points [first, first + count) of the point buffer, closing point included.
+struct Ring {
+  std::uint32_t first;
+  std::uint32_t count;
+};
+
+// Rings [first_ring, first_ring + ring_count) of the ring buffer. The first
+// one is the outer ring.
+struct Polygon {
+  std::uint32_t first_ring;
+  std::uint32_t ring_count;
+};
+
+// Views into the caller's buffers, valid while those buffers are.
+struct MultiPolygon {
+  std::span<const Polygon> polygons;
+  std::span<const Ring> rings;
+  std::span<const LngLat> points;
+};
+
+// Buffer sizes that always hold the outline of `cells` distinct cells.
+struct MultiPolygonCapacity {
+  std::size_t points;
+  std::size_t rings;
+  std::size_t polygons;
+};
+
+// Ring and Polygon index with 32 bits, so no buffer needs more entries.
+inline constexpr std::size_t kMaxMultiPolygonEntries =
+    std::numeric_limits<std::uint32_t>::max();
+
+// Sizes for `cells` distinct cells at `resolution`. Each cell has at most 6
+// edges and every outline edge adds one point, two at odd (Class III)
+// resolutions, the only ones where an edge can carry a distortion vertex (H3
+// faceijk.c). Every ring adds one closing point and every polygon holds at
+// least one cell. Returns InvalidResolution outside 0..15 and
+// TooManyCells when the point count would pass kMaxMultiPolygonEntries.
+[[nodiscard]] constexpr std::expected<MultiPolygonCapacity, Error>
+multipolygon_capacity(std::size_t cells, int resolution) noexcept {
+  if (resolution < kMinResolution || resolution > kMaxResolution)
+    return std::unexpected(Error::InvalidResolution);
+  const std::size_t points_per_edge = (resolution % 2 != 0) ? 2 : 1;
+  const std::size_t points_per_cell = 6 * points_per_edge + 2;
+  if (cells > kMaxMultiPolygonEntries / points_per_cell)
+    return std::unexpected(Error::TooManyCells);
+  return MultiPolygonCapacity{.points = cells * points_per_cell,
+                              .rings = 2 * cells,
+                              .polygons = cells};
+}
+
+// The outline of `cells`, from H3 cellsToMultiPolygon. The cells must be
+// valid, distinct and of one resolution. This sets no resolution limit, so
+// coarsen first when the outline must not be finer than a policy allows. Pass
+// the cells sorted ascending for a stable output, because H3 starts each ring
+// at an edge that depends on input order. Buffers sized by
+// multipolygon_capacity always fit. Only the first kMaxMultiPolygonEntries
+// entries of a buffer are used.
+//
+// Returns views into `points`, `rings` and `polygons`. Errors are NoCells for
+// an empty list, then what H3 reports, InvalidCell (0 included),
+// MixedResolution, DuplicateCell, TooManyCells or OutOfMemory, then
+// PolygonBufferFull, RingBufferFull or PointBufferFull. On any error the
+// buffers hold no usable result.
+//
+// Heap. This is the only call in the library that allocates. H3 allocates
+// while it traces the outline, through H3_MEMORY (vendor H3 alloc.h), and
+// frees all of it before this returns, on every path. That is plain malloc,
+// calloc, realloc and free unless the build sets an allocator prefix, see
+// EMBEDDED_H3_LOCATION_ALLOC_PREFIX in the README.
+[[nodiscard]] std::expected<MultiPolygon, Error>
+cells_to_multipolygon(std::span<const Cell> cells, std::span<LngLat> points,
+                      std::span<Ring> rings,
+                      std::span<Polygon> polygons) noexcept;
 
 } // namespace embedded_h3::location

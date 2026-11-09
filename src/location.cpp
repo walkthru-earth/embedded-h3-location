@@ -43,6 +43,14 @@ Error from_h3_error(std::uint32_t code) noexcept {
     return Error::InvalidResolution;
   case E_LATLNG_DOMAIN:
     return Error::OutOfRange;
+  case E_RES_MISMATCH:
+    return Error::MixedResolution;
+  case E_DUPLICATE_INPUT:
+    return Error::DuplicateCell;
+  case E_MEMORY_BOUNDS:
+    return Error::TooManyCells;
+  case E_MEMORY_ALLOC:
+    return Error::OutOfMemory;
   default:
     return Error::H3Failure;
   }
@@ -71,6 +79,22 @@ const char *error_name(Error error) noexcept {
     return "h3_failure";
   case TooCoarse:
     return "too_coarse";
+  case NoCells:
+    return "no_cells";
+  case MixedResolution:
+    return "mixed_resolution";
+  case DuplicateCell:
+    return "duplicate_cell";
+  case TooManyCells:
+    return "too_many_cells";
+  case OutOfMemory:
+    return "out_of_memory";
+  case PointBufferFull:
+    return "point_buffer_full";
+  case RingBufferFull:
+    return "ring_buffer_full";
+  case PolygonBufferFull:
+    return "polygon_buffer_full";
   }
   return "unknown";
 }
