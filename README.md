@@ -1,221 +1,251 @@
 # embedded-h3-location
 
 [![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
-[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://isocpp.org/)
+[![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://isocpp.org/)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-6.1%20on%20ESP32--S3-red.svg)](https://docs.espressif.com/projects/esp-idf/)
 [![Uber H3](https://img.shields.io/badge/Uber%20H3-v4.5.0-000000.svg)](https://github.com/uber/h3/releases/tag/v4.5.0)
 
-**Privacy-preserving Uber H3 v4.5.0 spatial indexing, monotonic cell coarsening, integer $10^{-7}$ degree centroids, and ISO 3166-1 alpha-2 country validation for ESP-IDF and embedded C/C++17.**
+A small C++23 layer over the official [Uber H3](https://github.com/uber/h3) C library for ESP-IDF and host builds. It indexes a position, coarsens a cell to a resolution the caller picks, prints and parses cell text, gives cell centers in degrees or $10^{-7}$ degrees, and checks ISO 3166-1 alpha-2 codes. Every fallible call returns `std::expected`. Nothing allocates, throws or keeps state.
 
-Developed and maintained by **[Walkthru.Earth](https://walkthru.earth)** for edge environmental telemetry, air-quality loggers, and privacy-first IoT nodes.
+Built and maintained by **[Walkthru.Earth](https://walkthru.earth)** for privacy first environmental sensors.
 
-## Hardware Verification Status
+## Verification status
 
 | Target | ESP-IDF | Status |
 | :--- | :--- | :--- |
-| ESP32-S3 | 6.1 | Hardware verified |
-| ESP32-C3, ESP32-C6, ESP32-P4 | 6.1 | Pending hardware verification |
+| ESP32-S3 | 6.1 (commit `fff9895c`) | The only verified target. v1.0.0 was verified on hardware. v2.0.0 builds in CI and has not run on a board yet |
+| Any other chip | | Not verified and not claimed |
 
-The component declares no `targets` list, so it builds for any ESP-IDF target, but only ESP32-S3 on ESP-IDF 6.1 has been run on real hardware. CI builds `examples/basic` for ESP32-S3 with the `espressif/idf:v6.1` container and runs the host tests in Debug and Release with ASan and UBSan.
+The manifest has no `targets` list, so other chips are not blocked. Only ESP32-S3 on ESP-IDF 6.1 is verified. CI builds `examples/basic` for ESP32-S3 in the `espressif/idf:v6.1` image pinned by digest, and runs the host tests in Debug and Release with ASan and UBSan.
 
----
+| Toolchain | Where it ran |
+| :--- | :--- |
+| GCC 15.2.0 (`esp-15.2.0_20251204`), `-std=gnu++23` | ESP-IDF 6.1 example build, local and CI |
+| GCC 14, `-std=c++23` | CI host tests and mutation proof on Ubuntu 24.04 |
+| Clang 23 with libc++, `-std=c++23` | Local host tests on macOS |
 
-## Features
-
-- **Unmodified Official Uber H3 v4.5.0 Core**: Bundles the exact upstream C library (`tag: v4.5.0`, commit `1b536c34225191ba24a75a840f634d4a48c3b206`) under `vendor/h3/` with configure-time SHA-256 verification against `vendor/h3/manifest.json`.
-- **Irreversible Privacy Coarsening (`aq::location::coarsen`)**: Clamps high-precision provisioning cells to a maximum disclosure resolution (`0..15`, default `5`) via official `cellToParent`. Coarser inputs remain coarser; increasing the cap later cannot reconstruct discarded fine coordinates.
-- **Zero-Heap, Stateless C++17 API**: Pure stack-only operations using an 8-byte `aq::location::Cell` (`uint64_t`) and fixed 16-byte canonical lowercase hex strings (`kCellTextBytes = 16`).
-- **Fixed-Point & Floating-Point Centroids**: Computes cell centers in both `double` WGS84 degrees (`center_degrees`) and rounded $10^{-7}$ degree 64-bit integers (`center_e7`) suitable for compact binary/Parquet telemetry columns.
-- **Explicit ISO 3166-1 Alpha-2 Validation (`valid_country`)**: Validates owner-declared 2-letter uppercase country codes against the 249 assigned ISO 3166-1 alpha-2 codes (UN M49 + ISO `TW` snapshot `2026-10-09`), never inferring sovereignty or country borders from H3 cells.
-- **Dual-Mode Build (`ESP-IDF` + Standalone `CMake`)**: Works out-of-the-box as an ESP-IDF component (`idf_component_register`) with `-ffunction-sections -fdata-sections` linker garbage collection, or as a standard CMake static library (`walkthru_earth::embedded_h3_location`).
-
----
-
-## Architecture & Privacy Flow
+## What the library does
 
 ```mermaid
 flowchart LR
-  subgraph Provisioning["1. Provisioning Boundary (Ephemeral)"]
-    GPS["Raw Coordinates\n(lat, lon) or Fine H3 Cell"]
-    Index["aq::location::from_degrees()\nor parse_cell()"]
-    Coarsen["aq::location::coarsen(\n  fine_cell, max_res=5\n)"]
+  subgraph Setup["Provisioning, never stored"]
+    Raw["Position or fine cell"]
+    Index["from_degrees or parse_cell"]
+    Coarsen["coarsen(cell, your limit)"]
   end
-
-  subgraph Persistence["2. Persisted Device State (NVS / Flash)"]
-    Stored["Published Coarsened Cell\n(uint64_t, e.g. res 5)\n+ Owner Country (ISO Alpha-2)"]
+  subgraph Device["Stored on the device"]
+    Stored["Coarse cell<br/>plus owner declared country"]
   end
-
-  subgraph Telemetry["3. Telemetry / Parquet Emission"]
-    Center["aq::location::center_e7()\n(lat_e7, lon_e7)"]
-    Format["aq::location::format_cell()\n(15-char lowercase hex)"]
-    Validate["aq::location::valid_country()\n(249 ISO-3166-1 codes)"]
+  subgraph Output["Published"]
+    Text["format_cell"]
+    Center["center_e7 or center_degrees"]
+    Country["valid_country"]
   end
-
-  GPS --> Index --> Coarsen --> Stored
+  Raw --> Index --> Coarsen --> Stored
+  Stored --> Text
   Stored --> Center
-  Stored --> Format
-  Stored --> Validate
+  Stored --> Country
 ```
 
-### Sequence of Operations
+- **Coarsening is one way.** `coarsen()` returns the parent at `min(limit, resolution(cell))`. A coarser input comes back as it is, so raising the limit later never recovers finer location.
+- **The limit is yours.** The library has no default resolution. A consumer such as the OpenSensor firmware sets its own rule, for example resolution 8.
+- **Store only the coarse cell.** Derive any public coordinate from that cell. A cell center is not the original position.
+- **The country is declared, not derived.** `valid_country()` checks the code against the 249 assigned ISO 3166-1 alpha-2 codes. H3 is not a country lookup.
+- **Official H3, unmodified.** Uber H3 v4.5.0 lives in `vendor/h3/`. CMake checks every file against `vendor/h3/manifest.json` before it builds.
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant Host as Provisioning Host / App
-  participant Loc as aq::location (C++17)
-  participant H3 as Uber H3 v4.5.0 (C99)
-  participant Storage as Telemetry / NVS Storage
-
-  Host->>Loc: from_degrees(37.7759387, -122.4179506, 9, fine_cell)
-  Loc->>H3: degsToRads() + latLngToCell() + isValidCell()
-  H3-->>Loc: fine_cell = 0x8928308280fffff (res 9)
-  Host->>Loc: coarsen(fine_cell, kDefaultResolution=5, published_cell)
-  Loc->>H3: cellToParent(fine_cell, min(5, 9))
-  H3-->>Loc: published_cell = 0x85283083fffffff (res 5)
-  Loc->>Storage: Store ONLY published_cell (discard fine_cell & GPS)
-  Storage->>Loc: center_e7(published_cell, lat_e7, lon_e7)
-  Loc->>H3: cellToLatLng() -> radsToDegs() -> llround(* 1e7)
-  H3-->>Storage: lat_e7, lon_e7 (approximate cell center)
+  participant App
+  participant Loc as embedded_h3::location
+  participant H3 as Uber H3 v4.5.0
+  App->>Loc: from_degrees(37.7759387, -122.4179506, 9)
+  Loc->>H3: latLngToCell
+  H3-->>Loc: 8928308280fffff (res 9)
+  App->>Loc: coarsen(cell, 5)
+  Loc->>H3: cellToParent(cell, 5)
+  H3-->>Loc: 85283083fffffff (res 5)
+  App->>App: store only the res 5 cell
+  App->>Loc: center_e7(stored)
+  Loc->>H3: cellToLatLng
+  Loc-->>App: E7 center of the cell
 ```
 
----
+## Add it to a project
 
-## Quick Start
+### ESP-IDF
 
-### 1. ESP-IDF Integration
-
-Add `embedded-h3-location` as a git dependency in your component's `idf_component.yml`. For git dependencies the [IDF Component Manager](https://docs.espressif.com/projects/idf-component-manager/en/latest/reference/manifest_file.html) treats `version` as a git reference (tag, branch or commit), not a semantic version range, so pin the release tag:
+For a git dependency the [IDF Component Manager](https://docs.espressif.com/projects/idf-component-manager/en/latest/reference/manifest_file.html) reads `version` as a git ref, a tag, branch or commit, not a version range. Pin the release tag.
 
 ```yaml
 dependencies:
   idf: ">=6.1"
   walkthru-earth/embedded-h3-location:
     git: "https://github.com/walkthru-earth/embedded-h3-location.git"
-    version: "v1.0.0"
+    version: "v2.0.0"
 ```
 
-Alternatively copy or submodule the repository into `components/embedded-h3-location`. A minimal buildable project lives in [`examples/basic`](examples/basic).
+ESP-IDF 6.1 compiles C++ as `gnu++26` by default. That is fine for the public header. This component compiles its own source as `gnu++23`, so an SDK default change cannot move its dialect. [`examples/basic`](examples/basic) is a minimal project.
 
-### 2. Standalone CMake Integration
-
-With CMake `FetchContent`:
+### CMake
 
 ```cmake
 include(FetchContent)
 FetchContent_Declare(
   embedded_h3_location
   GIT_REPOSITORY https://github.com/walkthru-earth/embedded-h3-location.git
-  GIT_TAG v1.0.0
+  GIT_TAG v2.0.0
 )
 FetchContent_MakeAvailable(embedded_h3_location)
-
 target_link_libraries(my_app PRIVATE walkthru_earth::embedded_h3_location)
 ```
 
-Or with a local checkout:
+`add_subdirectory(embedded-h3-location)` works the same way for a local checkout. The target requires C++23 and passes that to your code.
 
-```cmake
-add_subdirectory(embedded-h3-location)
-target_link_libraries(my_app PRIVATE walkthru_earth::embedded_h3_location)
-```
-
-### 3. C++17 Usage Example
+## Usage
 
 ```cpp
-#include "aq_location.h"
+#include <array>
+#include <cinttypes>
 #include <cstdio>
 
+#include <embedded_h3/location.h>
+
+namespace loc = embedded_h3::location;
+
+// Your privacy rule. The library has no default.
+constexpr int kPublishResolution = 8;
+
 int main() {
-  using namespace aq::location;
+  const auto published =
+      loc::from_degrees(37.7759387, -122.4179506, 9)
+          .and_then([](loc::Cell fine) { return loc::coarsen(fine, kPublishResolution); });
+  if (!published) {
+    std::printf("location failed: %s\n", loc::error_name(published.error()));
+    return 1;
+  }
 
-  // 1. Index raw coordinates at fine resolution (e.g. res 9)
-  Cell fine = 0;
-  if (!from_degrees(37.7759387, -122.4179506, 9, fine)) return 1;
+  std::array<char, loc::kCellTextBytes> text{};
+  if (!loc::format_cell(*published, text)) return 1;
 
-  // 2. Coarsen to privacy cap (default res 5) before saving to NVS or flash
-  Cell published = 0;
-  if (!coarsen(fine, kDefaultResolution, published)) return 1;
+  const auto center = loc::center_e7(*published);
+  if (!center) return 1;
 
-  // 3. Format canonical 15-character lowercase hex string
-  char hex[kCellTextBytes]{};
-  if (!format_cell(published, hex, sizeof(hex))) return 1;
-
-  // 4. Derive approximate cell centroid in 1e-7 degrees for telemetry columns
-  std::int64_t lat_e7 = 0, lon_e7 = 0;
-  if (!center_e7(published, lat_e7, lon_e7)) return 1;
-
-  // 5. Validate owner-declared ISO 3166-1 alpha-2 country code
-  if (!valid_country("US") || valid_country("XX")) return 1;
-
-  std::printf("cell=%s res=%d center=(%lld, %lld)\n",
-              hex, resolution(published),
-              static_cast<long long>(lat_e7),
-              static_cast<long long>(lon_e7));
-  return 0;
+  std::printf("cell=%s res=%d center_e7=(%" PRId64 ", %" PRId64 ")\n", text.data(),
+              loc::resolution(*published).value_or(-1), center->latitude,
+              center->longitude);
+  return loc::valid_country("US") ? 0 : 1;
 }
 ```
 
----
+Never call `.value()` on a result. Under `-fno-exceptions` it aborts on the device. Test the result, then use `*`, `->` or `value_or()`.
 
-## API Reference (`aq_location.h`)
+## API
 
-| Symbol / Function | Description |
+Everything is in `namespace embedded_h3::location`, header `<embedded_h3/location.h>`. Every function is `noexcept` and `[[nodiscard]]`.
+
+| Function | Returns | Errors |
+| :--- | :--- | :--- |
+| `valid_cell(Cell)` | `bool`, true for a valid H3 cell | |
+| `resolution(Cell)` | `expected<int, Error>`, 0..15 | `InvalidCell` |
+| `parse_cell(std::string_view)` | `expected<Cell, Error>` from exactly 15 hex digits, either case | `InvalidText`, `InvalidCell` |
+| `format_cell(Cell, std::span<char, 16>)` | `expected<void, Error>`, 15 lowercase digits and a NUL | `InvalidCell` |
+| `coarsen(Cell, int maximum_resolution)` | `expected<Cell, Error>`, parent at `min(limit, resolution)` | `InvalidResolution`, then `InvalidCell` |
+| `center_degrees(Cell)` | `expected<Degrees, Error>` | `InvalidCell` |
+| `center_e7(Cell)` | `expected<E7, Error>`, degrees times $10^7$, half away from zero | `InvalidCell` |
+| `from_degrees(double lat, double lng, int resolution)` | `expected<Cell, Error>` | `NonFinite`, then `OutOfRange`, then `InvalidResolution` |
+| `valid_country(std::string_view)` | `bool`, true for one of 249 uppercase codes | |
+| `error_name(Error)` | `const char *`, such as `"invalid_cell"`, safe for `%s` | |
+
+| `Error` | Meaning |
 | :--- | :--- |
-| `using Cell = std::uint64_t` | 64-bit H3 index value (`0` indicates absent/invalid). |
-| `constexpr int kDefaultResolution = 5` | Default privacy resolution cap (~252 $\text{km}^2$ average hex area). |
-| `constexpr std::size_t kCellTextBytes = 16` | Buffer size required for canonical 15 lowercase hex digits + `NUL`. |
-| `bool valid_cell(Cell cell)` | Validates cell via H3 `isValidCell(cell)`. Rejects `0`, non-cell modes, and deleted pentagon subsequences. |
-| `int resolution(Cell cell)` | Returns cell resolution (`0..15`), or `-1` if `cell` is invalid. |
-| `bool parse_cell(const char *text, Cell &cell)` | Parses an exact 15-character hex string (`[0-9a-fA-F]{15}`) into `cell`. Rejects `0x` prefixes, signs, or whitespace. |
-| `bool format_cell(Cell cell, char *text, std::size_t size)` | Writes 15 lowercase hex digits + `NUL` into `text` (`size >= 16`). |
-| `bool coarsen(Cell input, int maximum_resolution, Cell &published)` | Coarsens `input` to `std::min(maximum_resolution, resolution(input))` using H3 `cellToParent`. |
-| `bool center_degrees(Cell cell, double &latitude, double &longitude)` | Computes the WGS84 centroid of `cell` in degrees. |
-| `bool center_e7(Cell cell, std::int64_t &latitude, std::int64_t &longitude)` | Computes the WGS84 centroid of `cell` in rounded $10^{-7}$ degree integers. |
-| `bool from_degrees(double latitude, double longitude, int resolution, Cell &cell)` | Indexes finite `latitude` $\in [-90, 90]$ and `longitude` $\in [-180, 180]$ at `resolution` $\in [0, 15]$. |
-| `bool valid_country(const char *country)` | Returns `true` iff `country` is one of the 249 assigned uppercase ISO 3166-1 alpha-2 codes. |
+| `InvalidCell` | Not a valid H3 cell, including the absent cell 0 |
+| `InvalidResolution` | Resolution outside 0..15 |
+| `OutOfRange` | Latitude outside -90..90 or longitude outside -180..180, both ends allowed |
+| `NonFinite` | Latitude or longitude is NaN or infinite |
+| `InvalidText` | Cell text is not exactly 15 hex digits |
+| `H3Failure` | H3 rejected input this library had already checked |
 
----
+A `format_cell` buffer shorter than 16 bytes does not compile. A `std::string_view` does not need a NUL terminator.
 
-## Building & Running Host Tests
+## Migrating from v1
 
-To build and verify with CMake and `clang++` sanitizers (`AddressSanitizer` + `UndefinedBehaviorSanitizer`):
+v2 breaks the v1 API on purpose. There are no aliases.
+
+| v1 | v2 |
+| :--- | :--- |
+| `#include "aq_location.h"` | `#include <embedded_h3/location.h>` |
+| `namespace aq::location` | `namespace embedded_h3::location` |
+| C++17 | C++23 for the library and for any file that includes the header. ESP-IDF 6.1 `gnu++26` works |
+| `bool f(..., T &out)` | `std::expected<T, Error> f(...)` |
+| `kDefaultResolution = 5` | Removed. Pass your own limit to `coarsen()` |
+| `resolution()` returns -1 when invalid | Returns `Error::InvalidCell` |
+| `parse_cell(const char *, Cell &)` | `parse_cell(std::string_view)` |
+| `format_cell(Cell, char *, size_t)` | `format_cell(Cell, std::span<char, 16>)` |
+| `center_e7(Cell, int64_t &, int64_t &)` | `center_e7(Cell)` returns `E7{latitude, longitude}` |
+| `valid_country(const char *)` | `valid_country(std::string_view)` |
+
+The CMake target `walkthru_earth::embedded_h3_location` and the component name `walkthru-earth/embedded-h3-location` stay the same. Cell values, cell text and center values are the same for the same input, because H3 and the rounding did not change.
+
+## Reproducible images
+
+H3 calls `assert()`, which expands `__FILE__`, and debug info names source paths. With `EMBEDDED_H3_LOCATION_MAP_PATHS` on, the default, CMake adds `-ffile-prefix-map` so this checkout becomes `embedded-h3-location` and its build directory becomes `embedded-h3-location-build`. The checkout map is public, because your debug info names the header directory. Turn it off with `-DEMBEDDED_H3_LOCATION_MAP_PATHS=OFF` if you map paths yourself. Our own code never uses `__FILE__`.
+
+Evidence on 2026-11-09 with ESP-IDF 6.1 for ESP32-S3.
+
+- With `CONFIG_APP_REPRODUCIBLE_BUILD=y`, `examples/basic` built from two checkout paths gave the same app image, SHA-256 `9e010c6ffa9cabb568a0081ca183e43756e0059cda58128ae49256750ea7760b`. Neither `.bin` nor `.elf` held the checkout path.
+- Without that option, the map alone left no checkout path in the `.bin` or the `.elf`.
+- With the map off, the `.bin` held the absolute path of `vendor/h3/h3lib/lib/h3Index.c` from an H3 assert.
+
+CI repeats the two path build on every pull request. The IDF Component Manager finds an `override_path` component by its directory name, so keep the checkout folder named `embedded-h3-location`.
+
+## Develop
 
 ```bash
-# Debug and Release (-DNDEBUG) both run every check, the tests do not rely on assert().
-for type in Debug Release; do
-  cmake -B build-$type -DCMAKE_BUILD_TYPE=$type -DBUILD_TESTING=ON -DENABLE_SANITIZERS=ON
-  cmake --build build-$type
-  ctest --test-dir build-$type --output-on-failure
-done
-
-# Direct clang++ sanitizer verification against the built static library:
-clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all \
-  -Isrc tests/test_h3_location.cpp build-Debug/libembedded_h3_location.a \
-  -o build-Debug/test_h3_sanitized && ./build-Debug/test_h3_sanitized
+cmake --preset dev        # Debug, ASan and UBSan, writes build/compile_commands.json
+cmake --build --preset dev
+ctest --preset dev
+cmake --preset release && cmake --build --preset release && ctest --preset release
+tools/mutation_test.sh    # every guard mutant must be killed
+tools/check_h3_release.sh # warns when uber/h3 has a newer release
 ```
 
----
+**Editor support.** The committed [`.clangd`](.clangd) reads `build/compile_commands.json`, so run `cmake --preset dev` once. Before that, a fallback gives clangd `-std=c++23` with `include/` and `src/` on the path. `h3api.h` is generated by CMake, so files that include it need the configure step.
 
-## License & Attribution (CC-BY-4.0)
+The tests cover every `Error` value, every H3 error code mapping, the resolution and coordinate bounds, pentagons, invalid cells and coarsening monotonicity. `tools/mutation_test.sh` breaks each guard in `src/location.cpp` one at a time and checks that the tests fail. Maintainer rules and the H3 upgrade steps are in [`AGENTS.md`](AGENTS.md).
 
-Walkthru.Earth original code in this repository (`src/`, `tests/`, `examples/`, build files and documentation) is licensed under the **Creative Commons Attribution 4.0 International Public License (CC-BY-4.0)**. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). The CC-BY-4.0 license does not cover the third-party code listed below, which keeps its own license.
+## Upstream H3 fixes not yet released
 
-> **Attribution Requirement**: Any application, firmware image, hardware product, dataset, or documentation that uses or incorporates `embedded-h3-location` must include clear, visible attribution to **Walkthru.Earth** ([https://walkthru.earth](https://walkthru.earth)), for example:
+The newest uber/h3 release is v4.5.0, so that is what we vendor. We never vendor `master`. The upstream changelog lists these fixes under Unreleased, checked on 2026-11-09 at master `f421dc84`.
+
+| Fix | Upstream | Effect here |
+| :--- | :--- | :--- |
+| Latitude precision near the poles in `cellToLatLng` and `cellToBoundary` | [#1255](https://github.com/uber/h3/pull/1255) | `center_degrees` and `center_e7` call `cellToLatLng`, so centers near the poles get the fix after the next release. We have not measured the size of the change |
+| Out of bounds write in `gridRing` with a negative `k` | [#1235](https://github.com/uber/h3/pull/1235) | Our API never calls `gridRing` |
+| Out of bounds read in `_baseCellToCCWrot60` when `face == NUM_ICOSA_FACES` | [#1224](https://github.com/uber/h3/pull/1224) | Only the vertex functions call it, and our API does not |
+| `dirFaces` initialized in `vertexRotations` | [#1273](https://github.com/uber/h3/pull/1273) | A compiler warning fix in vertex code we do not call |
+
+`tools/check_h3_release.sh` runs in CI on every pull request and fails the weekly scheduled run once a newer release exists.
+
+## License and attribution
+
+Walkthru.Earth code in this repository (`include/`, `src/`, `tests/`, `tools/`, `examples/`, build files and docs) is licensed under the **Creative Commons Attribution 4.0 International Public License (CC-BY-4.0)**. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). CC-BY-4.0 does not cover the third-party code below.
+
+> **Attribution.** Any application, firmware image, product, dataset or document that uses `embedded-h3-location` must credit **Walkthru.Earth** ([https://walkthru.earth](https://walkthru.earth)) in a visible place. For example
 >
-> *"Spatial indexing and privacy coarsening powered by [Walkthru.Earth](https://walkthru.earth) (`walkthru-earth/embedded-h3-location`), licensed under CC-BY-4.0."*
+> *"Spatial indexing and privacy coarsening by [Walkthru.Earth](https://walkthru.earth) (`walkthru-earth/embedded-h3-location`), licensed under CC-BY-4.0."*
 
-The component manifest declares `license: "CC-BY-4.0 AND Apache-2.0"` to reflect both parts.
+The component manifest declares `license: "CC-BY-4.0 AND Apache-2.0"` for both parts.
 
-## Third-party notices
+### Third-party notices
 
 | Component | Location | License | Copyright |
 | :--- | :--- | :--- | :--- |
-| [Uber H3](https://github.com/uber/h3) v4.5.0 (commit `1b536c34225191ba24a75a840f634d4a48c3b206`), unmodified | `vendor/h3/` | Apache-2.0, see [`vendor/h3/LICENSE`](vendor/h3/LICENSE) and [`vendor/h3/NOTICE`](vendor/h3/NOTICE) | Copyright 2017-2021 Uber Technologies, Inc. |
+| [Uber H3](https://github.com/uber/h3) v4.5.0, commit `1b536c34225191ba24a75a840f634d4a48c3b206`, unmodified | `vendor/h3/` | Apache-2.0, see [`vendor/h3/LICENSE`](vendor/h3/LICENSE) and [`vendor/h3/NOTICE`](vendor/h3/NOTICE) | Copyright 2017-2021 Uber Technologies, Inc. |
 
-Firmware or binaries that link this library include compiled H3 code and must carry the Apache-2.0 license text and the H3 `NOTICE` file in addition to the Walkthru.Earth attribution.
+A firmware image or binary that links this library contains compiled H3 code. Ship the Apache-2.0 license text and the H3 `NOTICE` file with it, next to the Walkthru.Earth attribution.
 
-Other origins credited here, none of which is copied code:
+Other credits, none of them copied code.
 
-- The ISO 3166-1 alpha-2 code table in `src/iso_alpha2.h` is factual data (249 assigned codes, snapshot `2026-10-09`) compiled from the UN M49 ISO-alpha2 table plus the ISO assignment for `TW` (sources listed in the header).
-- Test fixtures in `tests/` reuse published example values from the official H3 documentation (`latLngToCell`, `cellToLatLng` and quick-start examples).
+- The ISO 3166-1 alpha-2 table in `src/iso_alpha2.h` is factual data, 249 assigned codes from a 2026-10-09 snapshot of the UN M49 ISO-alpha2 table plus the ISO assignment for `TW`. Sources are listed in the header.
+- Test fixtures in `tests/` reuse example values from the official H3 documentation.
