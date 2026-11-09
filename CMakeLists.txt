@@ -1,11 +1,13 @@
-cmake_minimum_required(VERSION 3.19)
+# CXX_STANDARD 23 needs CMake 3.20.
+cmake_minimum_required(VERSION 3.20)
 
-# Verify every vendored official Uber H3 v4.5.0 file against its SHA-256 manifest
-# before configuring the upstream public header; no host code generators required.
+# Verify every vendored official Uber H3 file against its SHA-256 manifest
+# before configuring the upstream public header. No host code generators.
 set(h3_root "${CMAKE_CURRENT_LIST_DIR}/vendor/h3")
 file(READ "${h3_root}/manifest.json" h3_manifest)
 string(JSON h3_count LENGTH "${h3_manifest}" files)
 math(EXPR h3_last "${h3_count} - 1")
+set(h3_sources "")
 foreach(index RANGE ${h3_last})
     string(JSON name MEMBER "${h3_manifest}" files ${index})
     string(JSON expected GET "${h3_manifest}" files "${name}")
@@ -13,45 +15,86 @@ foreach(index RANGE ${h3_last})
     if(NOT actual STREQUAL expected)
         message(FATAL_ERROR "Vendored H3 hash mismatch: ${name}")
     endif()
+    # Compile only the C files the manifest lists, so an unverified file
+    # dropped into vendor/h3 never reaches the build.
+    if(name MATCHES "^h3lib/lib/[^/]+\\.c$")
+        list(APPEND h3_sources "${h3_root}/${name}")
+    endif()
 endforeach()
 
-set(H3_VERSION_MAJOR 4)
-set(H3_VERSION_MINOR 5)
-set(H3_VERSION_PATCH 0)
+# The header version comes from the verified upstream VERSION file.
+file(STRINGS "${h3_root}/VERSION" h3_version LIMIT_COUNT 1)
+if(NOT h3_version MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+    message(FATAL_ERROR "vendor/h3/VERSION is not X.Y.Z: ${h3_version}")
+endif()
+set(H3_VERSION_MAJOR ${CMAKE_MATCH_1})
+set(H3_VERSION_MINOR ${CMAKE_MATCH_2})
+set(H3_VERSION_PATCH ${CMAKE_MATCH_3})
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include")
 configure_file("${h3_root}/h3lib/include/h3api.h.in"
                "${CMAKE_CURRENT_BINARY_DIR}/include/h3api.h" @ONLY)
-file(GLOB h3_sources "${h3_root}/h3lib/lib/*.c")
+
+# Reproducible images. H3 uses assert(), which expands __FILE__, and the
+# compiler writes source paths into debug info. Map this checkout and its build
+# directory to fixed names so no image or ELF holds a checkout path. Consumers
+# that map paths themselves can turn this off.
+option(EMBEDDED_H3_LOCATION_MAP_PATHS
+       "Map this checkout's paths to fixed names in macros and debug info" ON)
+set(embedded_h3_location_path_options "")
+if(EMBEDDED_H3_LOCATION_MAP_PATHS)
+    get_filename_component(eh3l_source_real "${CMAKE_CURRENT_LIST_DIR}" REALPATH)
+    get_filename_component(eh3l_binary_real "${CMAKE_CURRENT_BINARY_DIR}" REALPATH)
+    foreach(eh3l_map
+            "${CMAKE_CURRENT_LIST_DIR}=embedded-h3-location"
+            "${eh3l_source_real}=embedded-h3-location"
+            "${CMAKE_CURRENT_BINARY_DIR}=embedded-h3-location-build"
+            "${eh3l_binary_real}=embedded-h3-location-build")
+        list(APPEND embedded_h3_location_path_options "-ffile-prefix-map=${eh3l_map}")
+    endforeach()
+    list(REMOVE_DUPLICATES embedded_h3_location_path_options)
+endif()
+
+set(embedded_h3_location_sources "src/location.cpp" ${h3_sources})
 
 if(ESP_PLATFORM)
     idf_component_register(
-        SRCS "src/aq_location.cpp" ${h3_sources}
-        INCLUDE_DIRS "src"
-        PRIV_INCLUDE_DIRS "${h3_root}/h3lib/include" "${CMAKE_CURRENT_BINARY_DIR}/include"
+        SRCS ${embedded_h3_location_sources}
+        INCLUDE_DIRS "include"
+        PRIV_INCLUDE_DIRS "src" "${h3_root}/h3lib/include" "${CMAKE_CURRENT_BINARY_DIR}/include"
     )
-    target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_17)
-    # ESP-IDF's section GC drops unused polygon/traversal/export functions.
-    target_compile_options(${COMPONENT_LIB} PRIVATE -ffunction-sections -fdata-sections)
+    set(embedded_h3_location_target ${COMPONENT_LIB})
+    # ESP-IDF adds its own -std=gnu++26 (v6.1) as a build wide compile option,
+    # which lands after the flag that CXX_STANDARD writes. This option comes
+    # last, so an SDK default change cannot move the dialect. It applies to
+    # this component's C++ only. H3 keeps the SDK C dialect.
+    target_compile_options(${COMPONENT_LIB} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-std=gnu++23>")
 else()
-    project(embedded_h3_location VERSION 1.0.0 LANGUAGES C CXX)
+    project(embedded_h3_location VERSION 2.0.0 LANGUAGES C CXX)
+
+    # A top level host build writes compile_commands.json for clangd (.clangd).
+    if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+        set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+    endif()
 
     option(ENABLE_SANITIZERS "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
-    add_library(embedded_h3_location STATIC
-        "src/aq_location.cpp"
-        ${h3_sources}
-    )
+    add_library(embedded_h3_location STATIC ${embedded_h3_location_sources})
     add_library(walkthru_earth::embedded_h3_location ALIAS embedded_h3_location)
+    set(embedded_h3_location_target embedded_h3_location)
 
     target_include_directories(embedded_h3_location
         PUBLIC
-            "${CMAKE_CURRENT_LIST_DIR}/src"
+            "${CMAKE_CURRENT_LIST_DIR}/include"
         PRIVATE
+            "${CMAKE_CURRENT_LIST_DIR}/src"
             "${h3_root}/h3lib/include"
             "${CMAKE_CURRENT_BINARY_DIR}/include"
     )
-    target_compile_features(embedded_h3_location PUBLIC cxx_std_17)
-    target_compile_options(embedded_h3_location PRIVATE -ffunction-sections -fdata-sections)
+    # The public header needs std::expected, so consumers need C++23 too.
+    target_compile_features(embedded_h3_location PUBLIC cxx_std_23)
+    # Prove the library builds the way it runs on device.
+    target_compile_options(embedded_h3_location PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti;-Wall;-Wextra;-Wpedantic>")
     if(ENABLE_SANITIZERS)
         target_compile_options(embedded_h3_location PUBLIC -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
         target_link_options(embedded_h3_location PUBLIC -fsanitize=address,undefined -fno-sanitize-recover=all)
@@ -59,15 +102,28 @@ else()
     if(UNIX AND NOT APPLE)
         target_link_libraries(embedded_h3_location PRIVATE m)
     endif()
+endif()
 
-    if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-        include(CTest)
-        if(BUILD_TESTING)
-            enable_testing()
-            add_executable(test_h3_location "tests/test_h3_location.cpp")
-            target_link_libraries(test_h3_location PRIVATE embedded_h3_location)
-            target_compile_options(test_h3_location PRIVATE -Wall -Wextra -Werror)
-            add_test(NAME test_h3_location COMMAND test_h3_location)
-        endif()
+set_target_properties(${embedded_h3_location_target} PROPERTIES
+    CXX_STANDARD 23
+    CXX_STANDARD_REQUIRED ON)
+# Section GC drops the H3 functions this library does not call.
+target_compile_options(${embedded_h3_location_target} PRIVATE
+    -ffunction-sections -fdata-sections ${embedded_h3_location_path_options})
+
+if(NOT ESP_PLATFORM AND CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(CTest)
+    if(BUILD_TESTING)
+        target_compile_options(embedded_h3_location PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Werror>")
+        add_executable(test_location "tests/test_location.cpp")
+        target_link_libraries(test_location PRIVATE embedded_h3_location)
+        # The tests reach the private error mapping and H3's own header.
+        target_include_directories(test_location PRIVATE
+            "${CMAKE_CURRENT_LIST_DIR}/src" "${CMAKE_CURRENT_BINARY_DIR}/include")
+        set_target_properties(test_location PROPERTIES
+            CXX_STANDARD 23
+            CXX_STANDARD_REQUIRED ON)
+        target_compile_options(test_location PRIVATE -Wall -Wextra -Wpedantic -Werror)
+        add_test(NAME test_location COMMAND test_location)
     endif()
 endif()
