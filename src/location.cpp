@@ -63,6 +63,8 @@ const char *error_name(Error error) noexcept {
     return "invalid_text";
   case H3Failure:
     return "h3_failure";
+  case TooCoarse:
+    return "too_coarse";
   }
   return "unknown";
 }
@@ -118,6 +120,16 @@ std::expected<Cell, Error> coarsen(Cell input, int maximum_resolution) noexcept 
       status != E_SUCCESS)
     return unexpected(detail::from_h3_error(status));
   return parent;
+}
+
+std::expected<Cell, Error> parent_at(Cell input, int target) noexcept {
+  if (!valid_resolution(target))
+    return unexpected(Error::InvalidResolution);
+  if (!valid_cell(input))
+    return unexpected(Error::InvalidCell);
+  if (getResolution(input) < target)
+    return unexpected(Error::TooCoarse);
+  return coarsen(input, target);
 }
 
 std::expected<Degrees, Error> center_degrees(Cell cell) noexcept {

@@ -29,7 +29,11 @@ Not tagged yet. Only the owner tags a release.
 
 ### Added
 
-- `Error` enum with six values and `error_name()` for logs.
+- `Error` enum with seven values and `error_name()` for logs.
+- `parent_at(Cell, int)` returns the parent at exactly the given resolution
+  and `Error::TooCoarse` for a coarser cell. It never refines a cell. The
+  resolution is a caller argument, so a fixed rule such as H3 res 8 stays in
+  the consumer.
 - `-ffile-prefix-map` for this checkout and its build directory, on by default
   through `EMBEDDED_H3_LOCATION_MAP_PATHS`, so images hold no checkout path.
 - Tests for every error value, every H3 error code mapping, resolution and

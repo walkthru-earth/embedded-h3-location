@@ -73,10 +73,11 @@ struct Lcg {
 void error_names() {
   constexpr std::array all{Error::InvalidCell, Error::InvalidResolution,
                            Error::OutOfRange,  Error::NonFinite,
-                           Error::InvalidText, Error::H3Failure};
+                           Error::InvalidText, Error::H3Failure,
+                           Error::TooCoarse};
   constexpr std::array<std::string_view, all.size()> names{
-      "invalid_cell", "invalid_resolution", "out_of_range",
-      "non_finite",   "invalid_text",       "h3_failure"};
+      "invalid_cell", "invalid_resolution", "out_of_range", "non_finite",
+      "invalid_text", "h3_failure",         "too_coarse"};
   for (std::size_t i = 0; i < all.size(); ++i) {
     CHECK(static_cast<std::size_t>(std::to_underlying(all[i])) == i + 1); // no zero, no success value
     CHECK(names[i] == loc::error_name(all[i]));
@@ -188,6 +189,7 @@ void invalid_cells() {
     CHECK(!loc::valid_cell(bad));
     CHECK(fails_with(loc::resolution(bad), Error::InvalidCell));
     CHECK(fails_with(loc::coarsen(bad, 5), Error::InvalidCell));
+    CHECK(fails_with(loc::parent_at(bad, 0), Error::InvalidCell));
     CHECK(fails_with(loc::center_degrees(bad), Error::InvalidCell));
     CHECK(fails_with(loc::center_e7(bad), Error::InvalidCell));
     std::array<char, loc::kCellTextBytes> text{};
@@ -202,12 +204,17 @@ void resolution_arguments() {
   const Cell cell = 0x85283473fffffffULL;
   for (int bad : {-1, 16, INT_MIN, INT_MAX}) {
     CHECK(fails_with(loc::coarsen(cell, bad), Error::InvalidResolution));
+    CHECK(fails_with(loc::parent_at(cell, bad), Error::InvalidResolution));
     CHECK(fails_with(loc::from_degrees(0.0, 0.0, bad),
                      Error::InvalidResolution));
   }
   // coarsen checks the limit before the cell.
   CHECK(fails_with(loc::coarsen(0, 16), Error::InvalidResolution));
   CHECK(fails_with(loc::coarsen(0, 5), Error::InvalidCell));
+  // parent_at checks the resolution, then the cell, then TooCoarse.
+  CHECK(fails_with(loc::parent_at(0, 16), Error::InvalidResolution));
+  CHECK(fails_with(loc::parent_at(0, 15), Error::InvalidCell));
+  CHECK(fails_with(loc::parent_at(cell, 15), Error::TooCoarse));
   // Both ends of the range are accepted.
   CHECK(holds(loc::coarsen(cell, 0), Cell{0x8029fffffffffffULL}));
   CHECK(holds(loc::coarsen(cell, 15), cell));
@@ -264,6 +271,7 @@ void pentagons() {
     for (int res = 0; res <= 15; ++res) {
       const auto parent = loc::coarsen(child, res);
       CHECK(parent.has_value() && isPentagon(*parent));
+      CHECK(holds(loc::parent_at(child, res), *parent));
       CHECK(holds(loc::resolution(*parent), res));
       CHECK(loc::center_e7(*parent).has_value());
     }
@@ -316,6 +324,40 @@ void coarsen_monotonicity() {
   }
 }
 
+// parent_at gives the same cell at a fixed resolution for every finer input,
+// keeps an input already at that resolution and refuses every coarser one.
+void parent_at_fixed_resolution() {
+  Lcg rng{0xbeef};
+  for (int sample = 0; sample < 16; ++sample) {
+    const double lat = rng.next_unit() * 180.0 - 90.0;
+    const double lng = rng.next_unit() * 360.0 - 180.0;
+    const auto finest = loc::from_degrees(lat, lng, 15);
+    CHECK(finest.has_value());
+    for (int target = 0; target <= 15; ++target) {
+      H3Index expected = 0;
+      CHECK(cellToParent(*finest, target, &expected) == E_SUCCESS);
+      for (int input_res = 0; input_res <= 15; ++input_res) {
+        H3Index input = 0;
+        CHECK(cellToParent(*finest, input_res, &input) == E_SUCCESS);
+        const auto out = loc::parent_at(input, target);
+        if (input_res < target) {
+          CHECK(fails_with(out, Error::TooCoarse));
+        } else {
+          CHECK(holds(out, Cell{expected}));
+          CHECK(holds(loc::coarsen(input, target), Cell{expected}));
+        }
+      }
+    }
+  }
+  // A firmware style policy at res 8, the official fixture.
+  const Cell fine = 0x8928308280fffffULL; // res 9
+  const auto at8 = loc::parent_at(fine, 8);
+  CHECK(at8.has_value());
+  CHECK(holds(loc::resolution(*at8), 8));
+  CHECK(holds(loc::parent_at(*at8, 8), *at8));
+  CHECK(fails_with(loc::parent_at(0x85283083fffffffULL, 8), Error::TooCoarse));
+}
+
 void countries() {
   for (std::size_t i = 0; i < loc::detail::kIsoAlpha2.size(); i += 2)
     CHECK(loc::valid_country(loc::detail::kIsoAlpha2.substr(i, 2)));
@@ -340,6 +382,7 @@ static_assert(noexcept(loc::valid_cell(0)));
 static_assert(noexcept(loc::resolution(0)));
 static_assert(noexcept(loc::parse_cell(std::string_view{})));
 static_assert(noexcept(loc::coarsen(0, 0)));
+static_assert(noexcept(loc::parent_at(0, 0)));
 static_assert(noexcept(loc::center_degrees(0)));
 static_assert(noexcept(loc::center_e7(0)));
 static_assert(noexcept(loc::from_degrees(0, 0, 0)));
@@ -359,6 +402,7 @@ int main() {
   coordinate_bounds();
   pentagons();
   coarsen_monotonicity();
+  parent_at_fixed_resolution();
   countries();
   std::puts("test_location: ALL TESTS PASSED");
   return 0;

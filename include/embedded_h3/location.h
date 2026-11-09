@@ -36,6 +36,7 @@ enum class [[nodiscard]] Error : std::uint8_t {
   NonFinite,         // latitude or longitude is NaN or infinite
   InvalidText,       // cell text is not exactly 15 hex digits
   H3Failure,         // H3 rejected input this library had already checked
+  TooCoarse,         // cell is coarser than the resolution parent_at asks for
 };
 
 // Stable lowercase name for logs, such as "invalid_cell". Static storage,
@@ -74,6 +75,14 @@ format_cell(Cell cell, std::span<char, kCellTextBytes> out) noexcept;
 // this library sets no default. Checks maximum_resolution first, then input.
 [[nodiscard]] std::expected<Cell, Error> coarsen(Cell input,
                                                  int maximum_resolution) noexcept;
+
+// Parent of input at exactly the given resolution, from H3 cellToParent. A
+// cell at that resolution comes back as it is. A coarser cell gives TooCoarse,
+// because finer location cannot be restored, so this never returns a child.
+// Use it when every stored cell must sit at one resolution. The resolution is
+// the caller's policy. Checks resolution first, then input, then TooCoarse.
+[[nodiscard]] std::expected<Cell, Error> parent_at(Cell input,
+                                                   int resolution) noexcept;
 
 // WGS84 center of the cell, from H3 cellToLatLng.
 [[nodiscard]] std::expected<Degrees, Error> center_degrees(Cell cell) noexcept;
