@@ -100,6 +100,41 @@ jobs:
           print("location.cpp", stds)
           assert stds and stds[-1] == "-std=gnu++23", stds
           PY
+      - name: Build examples/basic with the H3 allocator prefix
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd examples/basic
+          idf.py -B build-alloc -DSDKCONFIG=build-alloc/sdkconfig \
+            -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.alloc" \
+            set-target ${{ matrix.target }}
+          idf.py -B build-alloc -DSDKCONFIG=build-alloc/sdkconfig \
+            -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.alloc" build
+      - name: Check which allocator H3 calls
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh" >/dev/null
+          nm="xtensa-${{ matrix.target }}-elf-nm"
+          lib=esp-idf/embedded-h3-location/libembedded-h3-location.a
+          cd examples/basic
+          # Captured first, so grep -q cannot cut a pipe under pipefail.
+          plain="$("$nm" -u "build/$lib")"
+          hooked="$("$nm" -u "build-alloc/$lib")"
+          # Default build. H3 calls plain malloc and never the example hooks.
+          grep -q -E ' U malloc$' <<<"$plain"
+          if grep -q example_h3_ <<<"$plain"; then
+            echo "default build calls the example_h3_ hooks"; exit 1
+          fi
+          # Prefix build. H3 calls all four hooks and no plain malloc,
+          # calloc or realloc. A plain free can remain on an H3 path it treats
+          # as unreachable, see the README.
+          for name in malloc calloc realloc free; do
+            grep -q -E " U example_h3_${name}\$" <<<"$hooked"
+          done
+          if grep -q -E ' U (malloc|calloc|realloc)$' <<<"$hooked"; then
+            echo "prefix build still calls plain malloc, calloc or realloc"; exit 1
+          fi
+          "$nm" build-alloc/embedded_h3_location_basic.elf | grep -E ' T example_h3_'
 
   reproducible:
     name: Reproducible image (two checkout paths)
@@ -118,7 +153,7 @@ jobs:
           # directory name, so both copies keep embedded-h3-location.
           for dir in /tmp/a /tmp/second-longer-checkout-path; do
             mkdir -p "$dir/embedded-h3-location"
-            cp -R CMakeLists.txt include src vendor examples idf_component.yml \
+            cp -R CMakeLists.txt Kconfig include src vendor examples idf_component.yml \
               LICENSE NOTICE "$dir/embedded-h3-location/"
             (cd "$dir/embedded-h3-location/examples/basic" \
               && idf.py set-target esp32s3 && idf.py build)

@@ -1,0 +1,4 @@
+# Route H3 allocations to the example_h3_ hooks in main/main.cpp. CI builds
+# once with this file added to SDKCONFIG_DEFAULTS and checks that H3 calls
+# the hooks.
+CONFIG_EMBEDDED_H3_LOCATION_ALLOC_PREFIX="example_h3_"
