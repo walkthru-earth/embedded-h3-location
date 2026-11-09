@@ -53,6 +53,27 @@ Not tagged yet. Only the owner tags a release.
 - CI jobs for the mutation proof and a two path reproducible build. Actions
   are pinned by SHA and the ESP-IDF image by digest.
 - `.clangd`, `CMakePresets.json`, `AGENTS.md` and this changelog.
+- `cells_to_multipolygon()` outlines a set of cells of one resolution as a
+  multipolygon of polygons, rings and points, written into caller spans.
+  `multipolygon_capacity()` gives span sizes that always fit, and any size
+  cap stays a caller argument. It wraps H3's internal `cellsToMultiPolygon`,
+  the only allocating call in the library, and frees the H3 result before it
+  returns.
+- Eight `Error` values for outlines, `NoCells`, `MixedResolution`,
+  `DuplicateCell`, `TooManyCells`, `OutOfMemory`, `PointBufferFull`,
+  `RingBufferFull` and `PolygonBufferFull`.
+- The consumer chooses H3's allocator. Kconfig
+  `EMBEDDED_H3_LOCATION_ALLOC_PREFIX` under ESP-IDF, or the CMake cache
+  variable of the same name on host, compiles H3 with `H3_ALLOC_PREFIX`.
+  Empty keeps plain `malloc`. The example shows PSRAM capable hooks over
+  `heap_caps_malloc`.
+- Outline tests compare 362 random, pentagon and pole cell sets bit for bit
+  with H3's linked list result. They cover pentagons at every odd
+  resolution, holes, the whole globe and every full buffer, and fail each H3
+  allocation in turn through a counting allocator. The mutation proof now covers the outline code and the
+  header.
+- CI builds the example a second time with the allocator prefix and checks
+  with `nm` which allocator the library calls in both builds.
 
 ### H3
 

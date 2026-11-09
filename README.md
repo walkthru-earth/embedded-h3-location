@@ -5,7 +5,7 @@
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-6.1%20on%20ESP32--S3-red.svg)](https://docs.espressif.com/projects/esp-idf/)
 [![Uber H3](https://img.shields.io/badge/Uber%20H3-v4.5.0-000000.svg)](https://github.com/uber/h3/releases/tag/v4.5.0)
 
-A small C++23 layer over the official [Uber H3](https://github.com/uber/h3) C library for ESP-IDF and host builds. It indexes a position, coarsens a cell to a resolution the caller picks, prints and parses cell text, gives cell centers in degrees or $10^{-7}$ degrees, and checks ISO 3166-1 alpha-2 codes. Every fallible call returns `std::expected`. Nothing allocates, throws or keeps state.
+A small C++23 layer over the official [Uber H3](https://github.com/uber/h3) C library for ESP-IDF and host builds. It indexes a position, coarsens a cell to a resolution the caller picks, prints and parses cell text, gives cell centers in degrees or $10^{-7}$ degrees, traces the outline of a set of cells as polygons, and checks ISO 3166-1 alpha-2 codes. Every fallible call returns `std::expected`. Nothing throws or keeps state. Only `cells_to_multipolygon` allocates, inside H3, and it frees all of it before it returns. The allocator H3 calls is yours to pick.
 
 Built and maintained by **[Walkthru.Earth](https://walkthru.earth)** for privacy first environmental sensors.
 
@@ -159,6 +159,8 @@ Everything is in `namespace embedded_h3::location`, header `<embedded_h3/locatio
 | `center_e7(Cell)` | `expected<E7, Error>`, degrees times $10^7$, half away from zero | `InvalidCell` |
 | `from_degrees(double lat, double lng, int resolution)` | `expected<Cell, Error>` | `NonFinite`, then `OutOfRange`, then `InvalidResolution` |
 | `valid_country(std::string_view)` | `bool`, true for one of 249 uppercase codes | |
+| `multipolygon_capacity(std::size_t cells, int resolution)` | `expected<MultiPolygonCapacity, Error>`, buffer sizes that always fit, `constexpr` | `InvalidResolution`, then `TooManyCells` |
+| `cells_to_multipolygon(std::span<const Cell>, std::span<LngLat>, std::span<Ring>, std::span<Polygon>)` | `expected<MultiPolygon, Error>`, views into your buffers | `NoCells`, then `InvalidCell`, `MixedResolution`, `DuplicateCell`, `TooManyCells` or `OutOfMemory` from H3, then `PolygonBufferFull`, `RingBufferFull` or `PointBufferFull` |
 | `error_name(Error)` | `const char *`, such as `"invalid_cell"`, safe for `%s` | |
 
 | `Error` | Meaning |
@@ -168,10 +170,66 @@ Everything is in `namespace embedded_h3::location`, header `<embedded_h3/locatio
 | `OutOfRange` | Latitude outside -90..90 or longitude outside -180..180, both ends allowed |
 | `NonFinite` | Latitude or longitude is NaN or infinite |
 | `InvalidText` | Cell text is not exactly 15 hex digits |
-| `H3Failure` | H3 rejected input this library had already checked |
+| `H3Failure` | H3 rejected input this library had already checked, or returned an outline that breaks its own contract |
 | `TooCoarse` | `parent_at` got a cell coarser than the resolution it asks for |
+| `NoCells` | `cells_to_multipolygon` got an empty list |
+| `MixedResolution` | The cells are not all at one resolution, H3 `E_RES_MISMATCH` |
+| `DuplicateCell` | A cell appears twice, H3 `E_DUPLICATE_INPUT` |
+| `TooManyCells` | The outline would need more entries than 32 bit indexes or H3's own size checks allow, H3 `E_MEMORY_BOUNDS` |
+| `OutOfMemory` | An H3 allocation failed, H3 `E_MEMORY_ALLOC`. H3 has already freed what it took |
+| `PointBufferFull` | The point buffer is too small |
+| `RingBufferFull` | The ring buffer is too small |
+| `PolygonBufferFull` | The polygon buffer is too small |
 
 A `format_cell` buffer shorter than 16 bytes does not compile. A `std::string_view` does not need a NUL terminator.
+
+## Cell outlines
+
+`cells_to_multipolygon` wraps H3 `cellsToMultiPolygon` and copies its result into buffers you own. Coordinates are degrees, longitude first, converted as `(radians * 180) / pi` like h3-js 4.5.0, so a host test compares the output bit for bit with H3 `cellsToLinkedMultiPolygon`, the call h3-js makes. Every ring is closed. Each polygon lists its outer ring first, counterclockwise, then its holes, clockwise. Polygons come largest first. The cells must be valid, distinct and of one resolution. The call sets no resolution limit, so coarsen first when a policy caps it. Pass the cells sorted for a stable output, because H3 starts each ring at an edge that depends on input order.
+
+```cpp
+std::array<loc::Cell, 3> cells{/* distinct cells at one resolution */};
+std::ranges::sort(cells);
+constexpr auto size = loc::multipolygon_capacity(cells.size(), 8);
+static_assert(size.has_value());
+std::array<loc::LngLat, size->points> points{};
+std::array<loc::Ring, size->rings> rings{};
+std::array<loc::Polygon, size->polygons> polygons{};
+const auto outline = loc::cells_to_multipolygon(cells, points, rings, polygons);
+if (!outline) return std::printf("outline failed: %s\n", loc::error_name(outline.error()));
+for (const loc::Polygon &polygon : outline->polygons)
+  for (const loc::Ring &ring : outline->rings.subspan(polygon.first_ring, polygon.ring_count))
+    for (const loc::LngLat &point : outline->points.subspan(ring.first, ring.count))
+      std::printf("%.7f %.7f\n", point.longitude, point.latitude);
+```
+
+`multipolygon_capacity` bounds the output from the cell count. Each cell has at most 6 edges. An outline edge adds one point, two at odd (Class III) resolutions, the only ones where H3 adds a distortion vertex (`faceijk.c`). Each ring adds a closing point, and a set of n cells has at most n polygons and 2n rings. A smaller buffer is fine when you know the shape. A full buffer returns `PointBufferFull`, `RingBufferFull` or `PolygonBufferFull`, never a partial outline.
+
+### Choosing the allocator
+
+H3 allocates only while it traces an outline, through `H3_MEMORY` in the vendored `vendor/h3/h3lib/include/alloc.h`. With no prefix that is plain `malloc`, `calloc`, `realloc` and `free`. With a prefix such as `my_h3_`, H3 calls `my_h3_malloc`, `my_h3_calloc`, `my_h3_realloc` and `my_h3_free` instead, and your application defines all four with C linkage and libc semantics. The prefix is a compile definition, the vendored files do not change, and the exported H3 names stay unprefixed.
+
+| Build | Setting | Default |
+| :--- | :--- | :--- |
+| ESP-IDF | `CONFIG_EMBEDDED_H3_LOCATION_ALLOC_PREFIX` in this component's `Kconfig` (menuconfig, or `sdkconfig.defaults`) | Empty, plain `malloc` |
+| CMake | `-DEMBEDDED_H3_LOCATION_ALLOC_PREFIX=my_h3_` | Empty, plain `malloc` |
+
+On ESP-IDF, when PSRAM serves `malloc` (`CONFIG_SPIRAM_USE_MALLOC`), a plain `malloc` of up to `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` bytes, 16384 by default, prefers internal RAM. To keep H3 in PSRAM, route the hooks to `heap_caps_*` with `MALLOC_CAP_SPIRAM`. [`examples/basic`](examples/basic) builds once with `sdkconfig.alloc`, which sets the prefix `example_h3_` over `heap_caps_*`, and CI checks that the image calls those hooks.
+
+```cpp
+#include <esp_heap_caps.h>
+constexpr uint32_t kCaps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+extern "C" {
+void *my_h3_malloc(size_t size) { return heap_caps_malloc(size, kCaps); }
+void *my_h3_calloc(size_t n, size_t size) { return heap_caps_calloc(n, size, kCaps); }
+void *my_h3_realloc(void *p, size_t size) { return heap_caps_realloc(p, size, kCaps); }
+void my_h3_free(void *p) { heap_caps_free(p); }
+}
+```
+
+One caveat in H3 v4.5.0. `cellsToMultiPoly.c` line 352 calls plain `free` on a block from `H3_MEMORY(malloc)`, inside a `NEVER(err)` branch that H3 treats as unreachable. On ESP-IDF 6.1 plain `free` is `heap_caps_free` (`components/esp_libc/src/heap.c`), which takes any `heap_caps_*` block, so hooks over `heap_caps_*` are safe. Hooks over a separate pool would need that branch never to run.
+
+The host test `test_multipolygon` builds the library with the prefix `eh3l_test_` and a counting allocator. It fails each H3 allocation in turn and checks that every one returns `OutOfMemory` with nothing left allocated. For 720 cells at resolution 8 on a 64 bit host, H3 peaked at about 700 KB with 720 separate cells, 560 KB for one solid blob and 600 KB for every other cell of a disk. The largest single block was 345,600 bytes. A 32 bit device uses less, because pointers are half the size, but nothing here measured a device.
 
 ## Migrating from v1
 
@@ -208,7 +266,7 @@ CI repeats the two path build on every pull request. The IDF Component Manager f
 ## Develop
 
 ```bash
-cmake --preset dev        # Debug, ASan and UBSan, writes build/compile_commands.json
+cmake --preset dev        # Debug, ASan and UBSan, writes build/compile_commands.json for clangd
 cmake --build --preset dev
 ctest --preset dev
 cmake --preset release && cmake --build --preset release && ctest --preset release
@@ -216,9 +274,9 @@ tools/mutation_test.sh    # every guard mutant must be killed
 tools/check_h3_release.sh # warns when uber/h3 has a newer release
 ```
 
-**Editor support.** The committed [`.clangd`](.clangd) reads `build/compile_commands.json`, so run `cmake --preset dev` once. Before that, a fallback gives clangd `-std=c++23` with `include/` and `src/` on the path. `h3api.h` is generated by CMake, so files that include it need the configure step.
+**Editor support.** A top level host configure always writes `compile_commands.json` (`CMAKE_EXPORT_COMPILE_COMMANDS`), and the committed [`.clangd`](.clangd) reads the one in `build/`, so run `cmake --preset dev` once. CMake generates `h3api.h` into `build/include` at that step, so `src/multipolygon.cpp`, the tests and anything else that includes it shows errors in the editor until then. Before a configure, a fallback gives clangd `-std=c++23` with `include/` and `src/` on the path. `clangd --check=tests/test_multipolygon.cpp` reports 0 errors after `cmake --preset dev`.
 
-The tests cover every `Error` value, every H3 error code mapping, the resolution and coordinate bounds, pentagons, invalid cells, coarsening monotonicity and `parent_at` against H3 `cellToParent` for every input and target resolution. `tools/mutation_test.sh` breaks each guard in `src/location.cpp` one at a time and checks that the tests fail. Maintainer rules and the H3 upgrade steps are in [`AGENTS.md`](AGENTS.md).
+The tests cover every `Error` value, every H3 error code mapping, the resolution and coordinate bounds, pentagons, invalid cells, coarsening monotonicity and `parent_at` against H3 `cellToParent` for every input and target resolution. For outlines they cover holes, islands, pentagons at every odd resolution, the poles, the whole globe from the 122 resolution 0 cells, every buffer limit, malformed H3 output, each failed allocation, and hundreds of random sets compared bit for bit with H3 `cellsToLinkedMultiPolygon`. `test_multipolygon` runs on a library built with a counting allocator prefix and `test_multipolygon_malloc` runs the same checks on the default build. `tools/mutation_test.sh` breaks each guard in `src/location.cpp`, `src/multipolygon.cpp` and `multipolygon_capacity` one at a time and checks that the tests fail. Maintainer rules and the H3 upgrade steps are in [`AGENTS.md`](AGENTS.md).
 
 ## Upstream H3 fixes not yet released
 

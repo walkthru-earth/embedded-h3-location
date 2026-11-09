@@ -1,8 +1,8 @@
 # Agent map for embedded-h3-location
 
 A stateless C++23 layer over the official Uber H3 C library, for ESP-IDF and
-host CMake. It indexes, coarsens, formats and parses cells, gives centers and
-checks ISO 3166-1 alpha-2 codes. The public API is one header,
+host CMake. It indexes, coarsens, formats and parses cells, gives centers,
+outlines a cell set as a multipolygon and checks ISO 3166-1 alpha-2 codes. The public API is one header,
 `include/embedded_h3/location.h`, in `namespace embedded_h3::location`. The
 CMake target is `walkthru_earth::embedded_h3_location`.
 
@@ -22,7 +22,9 @@ consumer, for example the OpenSensor firmware, never to this repo.
 - `[[nodiscard]]` and `noexcept` on every public function. Fixed extent
   `std::span` for buffers. `std::string_view` for text, and never pass its
   `.data()` to a C API that wants a NUL, copy it first.
-- No exceptions, no RTTI, no heap, no `std::format`, no iostream. Constant
+- No exceptions, no RTTI, no `std::format`, no iostream. Our code never
+  allocates. Only H3 does, inside `cells_to_multipolygon()`, and the caller
+  picks its allocator. Constant
   tables are `constexpr` so they sit in flash `.rodata`, `inline constexpr` in
   a header such as `src/iso_alpha2.h` and `static constexpr` in a source file.
   They are checked with `consteval` where possible.
@@ -52,12 +54,30 @@ Upgrade steps.
    `CHANGELOG.md` and this file.
 4. Run the gates below and the ESP-IDF example build.
 
-`cellsToMultiPolygon` is internal in H3 4.5.0, declared in
-`cellsToMultiPoly.h`, not in `h3api.h`. It allocates through `H3_MEMORY`
-(`malloc`, `calloc`, `realloc`, `free`). Any wrapper we add must document
-that heap use in the header and must work with `H3_ALLOC_PREFIX`, so a
-consumer can route H3 allocations, for example to PSRAM. No current API
-allocates.
+## Cell outlines and the H3 allocator
+
+`cells_to_multipolygon()` in `src/multipolygon.cpp` wraps `cellsToMultiPolygon`.
+That function is internal in H3 4.5.0, declared in `cellsToMultiPoly.h` and
+not in `h3api.h`. Recheck the declaration on every H3 upgrade. It allocates
+through `H3_MEMORY` (`malloc`, `calloc`, `realloc`, `free`). The wrapper
+copies the result into caller spans and frees the H3 result before it
+returns, so the caller owns no heap memory afterwards.
+`multipolygon_capacity()` sizes those spans. Any size cap is a caller
+argument, never a constant here.
+
+The consumer picks the allocator. Under ESP-IDF it is the Kconfig string
+`EMBEDDED_H3_LOCATION_ALLOC_PREFIX`, on host the CMake cache variable of the
+same name. Empty means plain `malloc`. A prefix `p_` compiles H3 with
+`H3_ALLOC_PREFIX=p_`, so H3 calls `p_malloc`, `p_calloc`, `p_realloc` and
+`p_free`, which the consumer defines with C linkage. `vendor/h3/h3lib/include/alloc.h`
+joins the name with `TJOIN`, which only exists under `H3_PREFIX`, so CMake
+also passes an empty `H3_PREFIX`. CMake rejects a prefix that is not a C
+identifier. H3 4.5.0 has one raw `free()` at `cellsToMultiPoly.c:352`, on a
+path it treats as unreachable. The README explains it.
+
+The tests build a second copy of the library with a counting allocator and
+fail each allocation in turn. CI checks with `nm` which allocator the ESP-IDF
+library calls, with and without the prefix.
 
 ## Reproducible builds
 
@@ -75,15 +95,26 @@ the firmware pin) is verified. Do not claim C3, C6, P4 or any other chip in
 docs, the manifest or CI until a board of that chip has a dated bench record.
 Host tests do not prove hardware behavior.
 
+## Editor setup
+
+`CMAKE_EXPORT_COMPILE_COMMANDS` is on. Run `cmake --preset dev` once and
+`.clangd` reads `build/compile_commands.json`, which also points at the
+generated `h3api.h`. After that `clangd --check=tests/test_multipolygon.cpp`
+and `clangd --check=src/multipolygon.cpp` report no compile diagnostics.
+Lines such as `tweak: AddUsing ==> FAIL` are refactoring probes. clangd counts
+them in its error total, but they are not compile errors.
+
 ## Gates
 
 Run all of these before a pull request.
 
 - `cmake --preset dev && cmake --build --preset dev && ctest --preset dev`
 - the same with the `release` preset
-- `tools/mutation_test.sh`. Every guard mutant must be killed. A new guard
-  needs a new mutant. An equivalent mutant needs a written reason.
-- the ESP-IDF build of `examples/basic` for `esp32s3`
+- `tools/mutation_test.sh`. It covers `src/location.cpp`,
+  `src/multipolygon.cpp` and the header. Every guard mutant must be killed. A
+  new guard needs a new mutant. An equivalent mutant needs a written reason.
+- the ESP-IDF build of `examples/basic` for `esp32s3`, once with the default
+  allocator and once with `sdkconfig.alloc`, which sets the prefix
 
 CI runs the same jobs. Every action is pinned by full SHA with a version
 comment, and the `espressif/idf` image by digest.

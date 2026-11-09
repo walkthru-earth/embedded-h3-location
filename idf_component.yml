@@ -1,5 +1,5 @@
 version: "2.0.0"
-description: "C++23 std::expected wrapper around official Uber H3 v4.5.0 for ESP-IDF. Cell coarsening to a caller chosen resolution, cell text, centers and ISO 3166-1 alpha-2 checks. No heap, no exceptions."
+description: "C++23 std::expected wrapper around official Uber H3 v4.5.0 for ESP-IDF. Cell coarsening to a caller chosen resolution, cell text, centers, cell set outlines and ISO 3166-1 alpha-2 checks. Only outlines use the heap, through an allocator the consumer picks. No exceptions."
 url: "https://github.com/walkthru-earth/embedded-h3-location"
 repository: "https://github.com/walkthru-earth/embedded-h3-location.git"
 documentation: "https://github.com/walkthru-earth/embedded-h3-location#readme"
