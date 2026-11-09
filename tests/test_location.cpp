@@ -11,6 +11,7 @@
 #include <array>
 #include <climits>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -70,6 +71,22 @@ struct Lcg {
     return static_cast<double>(state >> 11) * 0x1.0p-53;
   }
 };
+
+// The constants mirror the macros, and the string is MAJOR.MINOR.PATCH. CMake
+// checks the macros against the project, manifest and changelog versions.
+void version() {
+  static_assert(loc::kVersionMajor == EMBEDDED_H3_LOCATION_VERSION_MAJOR);
+  static_assert(loc::kVersionMinor == EMBEDDED_H3_LOCATION_VERSION_MINOR);
+  static_assert(loc::kVersionPatch == EMBEDDED_H3_LOCATION_VERSION_PATCH);
+  std::array<char, 32> text{};
+  const int length =
+      std::snprintf(text.data(), text.size(), "%d.%d.%d", loc::kVersionMajor,
+                    loc::kVersionMinor, loc::kVersionPatch);
+  CHECK(length > 0 && static_cast<std::size_t>(length) < text.size());
+  CHECK(loc::kVersion ==
+        std::string_view(text.data(), static_cast<std::size_t>(length)));
+  CHECK(loc::kVersion == std::string_view(EMBEDDED_H3_LOCATION_VERSION_STRING));
+}
 
 void error_names() {
   constexpr std::array all{
@@ -485,6 +502,7 @@ static_assert(std::is_same_v<std::underlying_type_t<Error>, std::uint8_t>);
 } // namespace
 
 int main() {
+  version();
   error_names();
   h3_error_mapping();
   official_fixtures();

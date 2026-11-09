@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: CC-BY-4.0
 # Copyright (c) 2025-2026 Walkthru.Earth (https://walkthru.earth)
 #
-# Mutation proof for the guards in src/location.cpp, src/multipolygon.cpp and
-# multipolygon_capacity in include/embedded_h3/location.h. Each mutant breaks
-# one guard in a scratch copy of the repo, rebuilds and runs every host test. A
-# killed mutant fails the tests. Each mutant keeps every name in use, so a
+# Mutation proof for the guards in src/location.cpp, src/multipolygon.cpp, and
+# multipolygon_capacity and nonzero_alloc_size in
+# include/embedded_h3/location.h. Each mutant breaks one guard in a scratch
+# copy of the repo, rebuilds and runs every host test. A killed mutant fails
+# the tests. Each mutant keeps every name in use, so a
 # -Werror unused warning cannot be what kills it. Every guard mutant must be
 # killed. Equivalent mutants are listed separately with the reason they cannot
 # be killed, and they must survive, so the list stays honest.
@@ -18,8 +19,9 @@ build_type="${1:-Debug}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-cp -R "$repo/CMakeLists.txt" "$repo/include" "$repo/src" "$repo/tests" \
-    "$repo/vendor" "$work/"
+# CMakeLists.txt checks the version against idf_component.yml and CHANGELOG.md.
+cp -R "$repo/CMakeLists.txt" "$repo/idf_component.yml" "$repo/CHANGELOG.md" \
+    "$repo/include" "$repo/src" "$repo/tests" "$repo/vendor" "$work/"
 cmake -S "$work" -B "$work/build" -DCMAKE_BUILD_TYPE="$build_type" \
     -DENABLE_SANITIZERS=ON >/dev/null
 cmake --build "$work/build" --parallel >/dev/null
@@ -211,6 +213,12 @@ guards = [
     (HDR, "capacity refuses the largest count that fits",
      "cells > kMaxMultiPolygonEntries / points_per_cell",
      "cells >= kMaxMultiPolygonEntries / points_per_cell"),
+    # nonzero_alloc_size, which allocator hooks use so the globe survives an
+    # allocator that returns NULL for zero bytes.
+    (HDR, "nonzero_alloc_size passes zero through",
+     "return size != 0 ? size : 1;", "return size != 0 ? size : 0;"),
+    (HDR, "nonzero_alloc_size rounds every size to 1",
+     "return size != 0 ? size : 1;", "return size != 0 ? 1 : 1;"),
 ]
 
 # Mutants that no test can kill, with the reason.

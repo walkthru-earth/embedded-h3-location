@@ -4,6 +4,14 @@
 
 #include <version>
 
+// The release this header belongs to. CMake checks at configure time that it
+// matches project(VERSION) in CMakeLists.txt, version in idf_component.yml and
+// the newest heading in CHANGELOG.md.
+#define EMBEDDED_H3_LOCATION_VERSION_MAJOR 2
+#define EMBEDDED_H3_LOCATION_VERSION_MINOR 0
+#define EMBEDDED_H3_LOCATION_VERSION_PATCH 0
+#define EMBEDDED_H3_LOCATION_VERSION_STRING "2.0.0"
+
 // 202211L adds the monadic operations (P2505R5) that the source and the
 // examples use, such as transform and and_then. libstdc++ from GCC 13 and
 // libc++ from LLVM 17 define it. GCC 12 defines only 202202L.
@@ -24,6 +32,13 @@
 // derive public coordinates from that cell. A cell center is not the original
 // position, and H3 is not a country lookup.
 namespace embedded_h3::location {
+
+// The same release as constants, for code that prefers them to macros.
+inline constexpr int kVersionMajor = EMBEDDED_H3_LOCATION_VERSION_MAJOR;
+inline constexpr int kVersionMinor = EMBEDDED_H3_LOCATION_VERSION_MINOR;
+inline constexpr int kVersionPatch = EMBEDDED_H3_LOCATION_VERSION_PATCH;
+inline constexpr std::string_view kVersion =
+    EMBEDDED_H3_LOCATION_VERSION_STRING;
 
 using Cell = std::uint64_t;
 
@@ -201,10 +216,26 @@ multipolygon_capacity(std::size_t cells, int resolution) noexcept {
 // while it traces the outline, through H3_MEMORY (vendor H3 alloc.h), and
 // frees all of it before this returns, on every path. That is plain malloc,
 // calloc, realloc and free unless the build sets an allocator prefix, see
-// EMBEDDED_H3_LOCATION_ALLOC_PREFIX in the README.
+// EMBEDDED_H3_LOCATION_ALLOC_PREFIX in the README. Where malloc(0) returns
+// NULL, as on ESP-IDF 6.1, the whole globe needs hooks that round zero up
+// with nonzero_alloc_size, or it returns OutOfMemory.
 [[nodiscard]] std::expected<MultiPolygon, Error>
 cells_to_multipolygon(std::span<const Cell> cells, std::span<LngLat> points,
                       std::span<Ring> rings,
                       std::span<Polygon> polygons) noexcept;
+
+// The size an allocator hook should pass on, at least 1. H3 can ask for zero
+// bytes. For the whole globe it calls
+// H3_MEMORY(malloc)(sizeof(SortableLoop) * numLoops) with numLoops 0
+// (cellsToMultiPoly.c line 388 in H3 v4.5.0) before it takes the globe path
+// (line 525), and it reads NULL as OutOfMemory. C lets malloc return NULL for
+// a zero size, and ESP-IDF 6.1 always does (heap_caps_base.c lines 113-116 at
+// commit fff9895c, reached by malloc, calloc, realloc and heap_caps_*). Pass
+// the size of a malloc or realloc hook and both calloc arguments through
+// this, so a zero request gets a 1 byte block that free releases.
+[[nodiscard]] constexpr std::size_t
+nonzero_alloc_size(std::size_t size) noexcept {
+  return size != 0 ? size : 1;
+}
 
 } // namespace embedded_h3::location

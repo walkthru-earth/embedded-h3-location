@@ -73,6 +73,17 @@ Not tagged yet. Only the owner tags a release.
   allocator fails each H3 allocation in turn, for a normal set and for the
   globe. The mutation proof now covers the outline code and the header. Host
   tests also run with a consumer allocator prefix set.
+- `nonzero_alloc_size()` for allocator hooks. H3 asks for zero bytes on the
+  whole globe, and ESP-IDF 6.1 returns NULL for zero bytes, so hooks that
+  pass the size straight through turned the globe into `OutOfMemory`. The
+  README snippet and the example round zero up to 1 byte. A host test models
+  a NULL on zero allocator and proves the globe fails without the rounding
+  and succeeds with it. Plain `malloc` on ESP-IDF 6.1 has the same zero size
+  behavior, see the README.
+- `EMBEDDED_H3_LOCATION_VERSION_MAJOR`, `_MINOR`, `_PATCH` and `_STRING`
+  macros and `kVersion` constants in the public header. Configuring the host
+  build fails when they disagree with `project(VERSION)`, `idf_component.yml`
+  or the newest `CHANGELOG.md` heading.
 - CI builds the example a second time with the allocator prefix and checks
   with `nm` which allocator the library calls in both builds.
 
@@ -96,5 +107,6 @@ Not tagged yet. Only the owner tags a release.
   with SHA-256 checked vendoring, cell coarsening, cell text, centers and
   ISO 3166-1 alpha-2 validation. ESP-IDF component and CMake library.
 
+<!-- At tag time the 2.0.0 link becomes compare/v1.0.0...v2.0.0, see AGENTS.md Releases. -->
 [2.0.0]: https://github.com/walkthru-earth/embedded-h3-location/compare/v1.0.0...v2-cpp23
 [1.0.0]: https://github.com/walkthru-earth/embedded-h3-location/releases/tag/v1.0.0

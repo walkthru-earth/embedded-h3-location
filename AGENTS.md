@@ -91,7 +91,9 @@ paths. The component manager needs the checkout folder to be named
 ## Verification status
 
 Only ESP32-S3 on ESP-IDF 6.1 (commit `fff9895c82d744c7237be8847347bdd1b07c6643`,
-the firmware pin) is verified. Do not claim C3, C6, P4 or any other chip in
+the firmware pin) is built in CI. v1.0.0 ran on that board, v2.0.0 has not run
+on a board yet. `idf_component.yml` has no `targets` list, as in v1, by owner
+decision. Keep the README saying plainly that this is not a claim of support. Do not claim C3, C6, P4 or any other chip in
 docs, the manifest or CI until a board of that chip has a dated bench record.
 Host tests do not prove hardware behavior.
 
@@ -128,12 +130,18 @@ the third-party table in `README.md`.
 
 ## Releases
 
-1. Bump `version` in `idf_component.yml` and `project(... VERSION)` in
-   `CMakeLists.txt`.
-2. Move the `CHANGELOG.md` section from Unreleased to the date.
+1. Bump `version` in `idf_component.yml`, `project(... VERSION)` in
+   `CMakeLists.txt` and the `EMBEDDED_H3_LOCATION_VERSION_*` macros in
+   `include/embedded_h3/location.h`. Configuring the host build fails when
+   they or the newest `CHANGELOG.md` heading disagree.
+2. In `CHANGELOG.md`, replace `Unreleased` in the section heading with the
+   release date as `YYYY-MM-DD`, drop the "Not tagged yet" line, and point the
+   compare link at the new tag, for example `compare/v1.0.0...v2.0.0` in
+   place of the branch name. Remove the HTML comment above the links.
 3. Merge to `main` through a pull request with green CI.
-4. Only the owner tags `vX.Y.Z` and creates the GitHub release. Agents never
-   tag, release or push to `main`.
+4. Only the owner tags `vX.Y.Z` on that merge commit, with the same version
+   as step 1, and creates the GitHub release. Agents never tag, release or
+   push to `main`.
 
 ## Writing and facts
 

@@ -13,10 +13,10 @@ Built and maintained by **[Walkthru.Earth](https://walkthru.earth)** for privacy
 
 | Target | ESP-IDF | Status |
 | :--- | :--- | :--- |
-| ESP32-S3 | 6.1 (commit `fff9895c`) | The only verified target. v1.0.0 was verified on hardware. v2.0.0 builds in CI and has not run on a board yet |
+| ESP32-S3 | 6.1 (commit `fff9895c`) | The only target CI builds. v1.0.0 was verified on hardware. v2.0.0 has not run on a board yet |
 | Any other chip | | Not verified and not claimed |
 
-The manifest has no `targets` list, so other chips are not blocked. Only ESP32-S3 on ESP-IDF 6.1 is verified. CI builds `examples/basic` for ESP32-S3 in the `espressif/idf:v6.1` image pinned by digest, and runs the host tests in Debug and Release with ASan and UBSan.
+The manifest has no `targets` list, as in v1, so the component manager and the registry do not limit the chip. That is not a claim of support. CI builds only for ESP32-S3, and v2.0.0 has not run on any board yet, ESP32-S3 included. Other chips are not blocked, but nothing has built or run there. CI builds `examples/basic` for ESP32-S3 in the `espressif/idf:v6.1` image pinned by digest, and runs the host tests in Debug and Release with ASan and UBSan.
 
 | Toolchain | Where it ran |
 | :--- | :--- |
@@ -162,6 +162,7 @@ Everything is in `namespace embedded_h3::location`, header `<embedded_h3/locatio
 | `multipolygon_capacity(std::size_t cells, int resolution)` | `expected<MultiPolygonCapacity, Error>`, buffer sizes that always fit, `constexpr` | `InvalidResolution`, then `TooManyCells` |
 | `cells_to_multipolygon(std::span<const Cell>, std::span<LngLat>, std::span<Ring>, std::span<Polygon>)` | `expected<MultiPolygon, Error>`, views into your buffers | `NoCells`, then `InvalidCell`, `MixedResolution`, `DuplicateCell`, `TooManyCells` or `OutOfMemory` from H3, then `PolygonBufferFull`, `RingBufferFull` or `PointBufferFull` |
 | `error_name(Error)` | `const char *`, such as `"invalid_cell"`, safe for `%s` | |
+| `nonzero_alloc_size(std::size_t)` | `std::size_t`, the size with 0 raised to 1, `constexpr`, for allocator hooks, see [Choosing the allocator](#choosing-the-allocator) | |
 
 | `Error` | Meaning |
 | :--- | :--- |
@@ -180,6 +181,8 @@ Everything is in `namespace embedded_h3::location`, header `<embedded_h3/locatio
 | `PointBufferFull` | The point buffer is too small |
 | `RingBufferFull` | The ring buffer is too small |
 | `PolygonBufferFull` | The polygon buffer is too small |
+
+The header names its release as `EMBEDDED_H3_LOCATION_VERSION_MAJOR`, `_MINOR`, `_PATCH` and `_STRING` macros, and as `kVersionMajor`, `kVersionMinor`, `kVersionPatch` and `kVersion`. A host configure fails when they disagree with the CMake project, `idf_component.yml` or the newest heading in `CHANGELOG.md`.
 
 A `format_cell` buffer shorter than 16 bytes does not compile. A `std::string_view` does not need a NUL terminator.
 
@@ -218,18 +221,24 @@ On ESP-IDF, when PSRAM serves `malloc` (`CONFIG_SPIRAM_USE_MALLOC`), a plain `ma
 
 ```cpp
 #include <esp_heap_caps.h>
+#include <embedded_h3/location.h>
+using embedded_h3::location::nonzero_alloc_size;
 constexpr uint32_t kCaps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
 extern "C" {
-void *my_h3_malloc(size_t size) { return heap_caps_malloc(size, kCaps); }
-void *my_h3_calloc(size_t n, size_t size) { return heap_caps_calloc(n, size, kCaps); }
-void *my_h3_realloc(void *p, size_t size) { return heap_caps_realloc(p, size, kCaps); }
+void *my_h3_malloc(size_t size) { return heap_caps_malloc(nonzero_alloc_size(size), kCaps); }
+void *my_h3_calloc(size_t n, size_t size) {
+  return heap_caps_calloc(nonzero_alloc_size(n), nonzero_alloc_size(size), kCaps);
+}
+void *my_h3_realloc(void *p, size_t size) { return heap_caps_realloc(p, nonzero_alloc_size(size), kCaps); }
 void my_h3_free(void *p) { heap_caps_free(p); }
 }
 ```
 
+Why the hooks round zero up. H3 v4.5.0 can ask for zero bytes. For the whole globe, the 122 resolution 0 cells, `createSortableLoopSet` calls `H3_MEMORY(malloc)(sizeof(SortableLoop) * numLoops)` with `numLoops` 0 (`cellsToMultiPoly.c` line 388) and takes the globe path only later (line 525). H3 reads a NULL result as a failed allocation. C lets `malloc(0)` return NULL, and ESP-IDF 6.1 always does. `heap_caps_aligned_alloc_base` returns NULL for size 0 (`components/heap/heap_caps_base.c` lines 113-116 at `fff9895c`), and `heap_caps_malloc`, `heap_caps_calloc`, `heap_caps_realloc` with a NULL pointer, and plain `malloc` all reach it. So hooks that pass the size straight through return `OutOfMemory` for the globe. `nonzero_alloc_size` turns 0 into 1 and leaves every other size alone. The same holds with no prefix, because plain `malloc` on ESP-IDF 6.1 is `heap_caps_malloc_default` (`components/esp_libc/src/heap.c`). Set a prefix and round zero up if your app may outline the whole globe on a device.
+
 One caveat in H3 v4.5.0. `cellsToMultiPoly.c` line 352 calls plain `free` on a block from `H3_MEMORY(malloc)`, inside a `NEVER(err)` branch that H3 treats as unreachable. On ESP-IDF 6.1 plain `free` is `heap_caps_free` (`components/esp_libc/src/heap.c`), which takes any `heap_caps_*` block, so hooks over `heap_caps_*` are safe. Hooks over a separate pool would need that branch never to run.
 
-The host test `test_multipolygon` builds the library with the prefix `eh3l_test_` and a counting allocator. It fails each H3 allocation in turn, for a normal cell set and for the whole globe, which H3 builds on its own path, and checks that every one returns `OutOfMemory` with nothing left allocated. For 720 cells at resolution 8 on a 64 bit host, H3 peaked at about 700 KB with 720 separate cells, 560 KB for one solid blob and 600 KB for every other cell of a disk. The largest single block was 345,600 bytes. A 32 bit device uses less, because pointers are half the size, but nothing here measured a device.
+The host test `test_multipolygon` builds the library with the prefix `eh3l_test_` and a counting allocator. It fails each H3 allocation in turn, for a normal cell set and for the whole globe, which H3 builds on its own path, and checks that every one returns `OutOfMemory` with nothing left allocated. It also makes the counting allocator return NULL for zero bytes, as ESP-IDF does, and checks that the whole globe then fails with `OutOfMemory` when the hooks pass the size through and succeeds when they round it up with `nonzero_alloc_size`. For 720 cells at resolution 8 on a 64 bit host, H3 peaked at about 700 KB with 720 separate cells, 560 KB for one solid blob and 600 KB for every other cell of a disk. The largest single block was 345,600 bytes. A 32 bit device uses less, because pointers are half the size, but nothing here measured a device.
 
 ## Migrating from v1
 
@@ -276,7 +285,7 @@ tools/check_h3_release.sh # warns when uber/h3 has a newer release
 
 **Editor support.** A top level host configure always writes `compile_commands.json` (`CMAKE_EXPORT_COMPILE_COMMANDS`), and the committed [`.clangd`](.clangd) reads the one in `build/`, so run `cmake --preset dev` once. CMake generates `h3api.h` into `build/include` at that step, so `src/multipolygon.cpp`, the tests and anything else that includes it shows errors in the editor until then. Before a configure, a fallback gives clangd `-std=c++23` with `include/` and `src/` on the path. `clangd --check=tests/test_multipolygon.cpp` reports 0 errors after `cmake --preset dev`.
 
-The tests cover every `Error` value, every H3 error code mapping, the resolution and coordinate bounds, pentagons, invalid cells, coarsening monotonicity and `parent_at` against H3 `cellToParent` for every input and target resolution. For outlines they cover holes, islands, pentagons at every odd resolution, the poles, the whole globe from the 122 resolution 0 cells, every buffer limit, malformed H3 output, each failed allocation, and hundreds of random sets compared bit for bit with H3 `cellsToLinkedMultiPolygon`. `test_multipolygon` runs on a library built with a counting allocator prefix and `test_multipolygon_malloc` runs the same checks on a library that calls plain `malloc`. With `EMBEDDED_H3_LOCATION_ALLOC_PREFIX` set, the public library keeps your prefix and the tests build their own unprefixed copy. `tools/mutation_test.sh` breaks each guard in `src/location.cpp`, `src/multipolygon.cpp` and `multipolygon_capacity` one at a time and checks that the tests fail. Maintainer rules and the H3 upgrade steps are in [`AGENTS.md`](AGENTS.md).
+The tests cover every `Error` value, every H3 error code mapping, the resolution and coordinate bounds, pentagons, invalid cells, coarsening monotonicity and `parent_at` against H3 `cellToParent` for every input and target resolution. For outlines they cover holes, islands, pentagons at every odd resolution, the poles, the whole globe from the 122 resolution 0 cells, every buffer limit, malformed H3 output, each failed allocation, and hundreds of random sets compared bit for bit with H3 `cellsToLinkedMultiPolygon`. `test_multipolygon` runs on a library built with a counting allocator prefix and `test_multipolygon_malloc` runs the same checks on a library that calls plain `malloc`. With `EMBEDDED_H3_LOCATION_ALLOC_PREFIX` set, the public library keeps your prefix and the tests build their own unprefixed copy. `tools/mutation_test.sh` breaks each guard in `src/location.cpp`, `src/multipolygon.cpp`, `multipolygon_capacity` and `nonzero_alloc_size` one at a time and checks that the tests fail. Maintainer rules and the H3 upgrade steps are in [`AGENTS.md`](AGENTS.md).
 
 ## Upstream H3 fixes not yet released
 

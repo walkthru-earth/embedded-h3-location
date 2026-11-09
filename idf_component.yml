@@ -17,8 +17,9 @@ tags:
   - iso3166
   - esp-idf
   - cpp23
-# No targets list on purpose. Hardware verified on ESP32-S3 only. Other chips
-# are not verified and are not claimed, but are not blocked.
+# No targets list on purpose, as in v1 (owner decision). That is not a claim
+# of support. CI builds ESP32-S3 only, and v2 has not run on a board yet.
+# Other chips are not verified and not claimed, but are not blocked.
 dependencies:
   # The public header needs C++23 std::expected, which ESP-IDF 6.1 ships.
   idf: ">=6.1"

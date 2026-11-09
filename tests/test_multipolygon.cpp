@@ -70,6 +70,14 @@ struct Heap {
   std::size_t small_peak = 0;
   std::size_t small_allocations = 0;
   std::size_t fail_at = SIZE_MAX; // allocation index to fail
+  std::size_t zero_requests = 0;  // hook calls that asked for zero bytes
+  // ESP-IDF 6.1 heap_caps_* return NULL for zero bytes (heap_caps_base.c
+  // lines 113-116 at fff9895c). Host libc returns a block, so the test
+  // models the device with this flag.
+  bool zero_returns_null = false;
+  // The hooks pass every size through nonzero_alloc_size, as the README
+  // snippet and examples/basic do.
+  bool round_zero_up = false;
 };
 Heap heap;
 
@@ -86,6 +94,8 @@ constexpr std::size_t kHeader = alignof(std::max_align_t);
 
 void *take(std::size_t size, bool zero) {
   if (heap.allocations++ == heap.fail_at)
+    return nullptr;
+  if (size == 0 && heap.zero_returns_null)
     return nullptr;
   auto *block = static_cast<unsigned char *>(std::malloc(kHeader + size));
   if (block == nullptr)
@@ -127,16 +137,28 @@ void give(void *pointer) {
 } // namespace
 
 #if EMBEDDED_H3_LOCATION_TEST_COUNTING
+namespace {
+// Counts a zero request and applies the hook's rounding.
+std::size_t hook_size(std::size_t size) {
+  if (size == 0)
+    ++heap.zero_requests;
+  return heap.round_zero_up ? loc::nonzero_alloc_size(size) : size;
+}
+} // namespace
+
 // libc semantics, as heap_caps_* on ESP-IDF give them.
 extern "C" {
-void *eh3l_test_malloc(std::size_t size) { return take(size, false); }
+void *eh3l_test_malloc(std::size_t size) {
+  return take(hook_size(size), false);
+}
 void *eh3l_test_calloc(std::size_t count, std::size_t size) {
   std::size_t bytes = 0;
-  if (__builtin_mul_overflow(count, size, &bytes))
+  if (__builtin_mul_overflow(hook_size(count), hook_size(size), &bytes))
     return nullptr;
   return take(bytes, true);
 }
 void *eh3l_test_realloc(void *pointer, std::size_t size) {
+  size = hook_size(size);
   if (pointer == nullptr)
     return take(size, false);
   if (size == 0) {
@@ -620,6 +642,46 @@ void out_of_memory() {
               total, globe_total);
 }
 
+// H3 asks for zero bytes on the whole globe (cellsToMultiPoly.c line 388,
+// numLoops 0, before the globe check at line 525). With an allocator that
+// returns NULL for zero bytes, as ESP-IDF 6.1 does, hooks that pass the size
+// through turn the globe into OutOfMemory, and hooks that round it up with
+// nonzero_alloc_size succeed.
+void zero_size_requests() {
+  // Runtime checks, not static_assert, so a mutant of the helper still builds
+  // and fails here.
+  CHECK(loc::nonzero_alloc_size(0) == 1);
+  CHECK(loc::nonzero_alloc_size(5) == 5);
+  CHECK(loc::nonzero_alloc_size(SIZE_MAX) == SIZE_MAX);
+  if constexpr (!kCounting)
+    return;
+  std::vector<Cell> globe(static_cast<std::size_t>(res0CellCount()));
+  CHECK(getRes0Cells(globe.data()) == E_SUCCESS);
+  std::ranges::sort(globe);
+  Buffers buffers(globe.size(), 0);
+
+  reset_heap();
+  heap.zero_returns_null = true;
+  const auto plain = run(globe, buffers);
+  CHECK(heap.zero_requests > 0);
+  CHECK(fails_with(plain, Error::OutOfMemory));
+  CHECK(heap_clean());
+
+  reset_heap();
+  heap.zero_returns_null = true;
+  heap.round_zero_up = true;
+  const auto rounded = run(globe, buffers);
+  CHECK(heap.zero_requests > 0);
+  CHECK(heap_clean());
+  CHECK(rounded && rounded->polygons.size() == 8 &&
+        rounded->rings.size() == 8 && rounded->points.size() == 32 &&
+        closed(*rounded) && packed(*rounded));
+  CHECK(rounded && equals_linked(globe, *rounded));
+  std::printf("test_multipolygon: globe with NULL on zero bytes, OutOfMemory "
+              "unrounded, success rounded, %zu zero requests\n",
+              heap.zero_requests);
+}
+
 // One random disk with about a third of its cells dropped, to make holes and
 // islands. Returns whether a set was checked.
 bool random_set() {
@@ -732,6 +794,7 @@ int main() {
   full_buffers();
   malformed_output();
   out_of_memory();
+  zero_size_requests();
   random_sets();
   worst_cases();
   std::puts(kCounting ? "test_multipolygon: ALL TESTS PASSED"

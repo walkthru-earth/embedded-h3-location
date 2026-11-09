@@ -24,20 +24,24 @@ constexpr int kPublishResolution = 8;
 // Heap for H3 when CONFIG_EMBEDDED_H3_LOCATION_ALLOC_PREFIX is "example_h3_",
 // as sdkconfig.alloc sets it. On a board with PSRAM use MALLOC_CAP_SPIRAM to
 // keep H3 out of internal RAM. With the prefix empty nothing calls these and
-// the linker drops them.
+// the linker drops them. heap_caps_* return NULL for a zero size and H3 asks
+// for zero bytes on the whole globe, so every size goes through
+// nonzero_alloc_size.
 constexpr std::uint32_t kH3Caps = MALLOC_CAP_DEFAULT | MALLOC_CAP_8BIT;
+using embedded_h3::location::nonzero_alloc_size;
 
 } // namespace
 
 extern "C" {
 void *example_h3_malloc(std::size_t size) {
-  return heap_caps_malloc(size, kH3Caps);
+  return heap_caps_malloc(nonzero_alloc_size(size), kH3Caps);
 }
 void *example_h3_calloc(std::size_t count, std::size_t size) {
-  return heap_caps_calloc(count, size, kH3Caps);
+  return heap_caps_calloc(nonzero_alloc_size(count), nonzero_alloc_size(size),
+                          kH3Caps);
 }
 void *example_h3_realloc(void *pointer, std::size_t size) {
-  return heap_caps_realloc(pointer, size, kH3Caps);
+  return heap_caps_realloc(pointer, nonzero_alloc_size(size), kH3Caps);
 }
 void example_h3_free(void *pointer) { heap_caps_free(pointer); }
 }

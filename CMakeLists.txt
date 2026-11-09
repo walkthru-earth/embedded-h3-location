@@ -154,6 +154,37 @@ if(ESP_PLATFORM)
 else()
     project(embedded_h3_location VERSION 2.0.0 LANGUAGES C CXX)
 
+    # One release number in four places. The public header macros, this
+    # project() call, version in idf_component.yml and the newest heading in
+    # CHANGELOG.md must agree, or configuring fails.
+    set(eh3l_header "${CMAKE_CURRENT_LIST_DIR}/include/embedded_h3/location.h")
+    foreach(part IN ITEMS MAJOR MINOR PATCH)
+        file(STRINGS "${eh3l_header}" eh3l_line
+             REGEX "^#define EMBEDDED_H3_LOCATION_VERSION_${part} [0-9]+$")
+        if(NOT eh3l_line MATCHES " ([0-9]+)$")
+            message(FATAL_ERROR "location.h has no EMBEDDED_H3_LOCATION_VERSION_${part}")
+        endif()
+        set(eh3l_header_${part} ${CMAKE_MATCH_1})
+    endforeach()
+    set(eh3l_header_version
+        "${eh3l_header_MAJOR}.${eh3l_header_MINOR}.${eh3l_header_PATCH}")
+    file(STRINGS "${eh3l_header}" eh3l_line
+         REGEX "^#define EMBEDDED_H3_LOCATION_VERSION_STRING \"[^\"]*\"$")
+    string(REGEX REPLACE "^.*\"([^\"]*)\"$" "\\1" eh3l_header_string "${eh3l_line}")
+    file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/idf_component.yml" eh3l_line
+         REGEX "^version: \"[^\"]*\"$")
+    string(REGEX REPLACE "^version: \"([^\"]*)\"$" "\\1" eh3l_manifest_version "${eh3l_line}")
+    file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/CHANGELOG.md" eh3l_line
+         REGEX "^## \\[[^]]*\\]" LIMIT_COUNT 1)
+    string(REGEX REPLACE "^## \\[([^]]*)\\].*$" "\\1" eh3l_changelog_version "${eh3l_line}")
+    foreach(eh3l_other IN ITEMS PROJECT_VERSION eh3l_header_string
+            eh3l_manifest_version eh3l_changelog_version)
+        if(NOT "${${eh3l_other}}" STREQUAL "${eh3l_header_version}")
+            message(FATAL_ERROR "Version mismatch. location.h says "
+                "${eh3l_header_version}, ${eh3l_other} says '${${eh3l_other}}'")
+        endif()
+    endforeach()
+
     # A top level host build writes compile_commands.json for clangd (.clangd).
     if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
