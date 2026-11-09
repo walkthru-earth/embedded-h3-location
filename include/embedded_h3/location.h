@@ -46,6 +46,7 @@ enum class [[nodiscard]] Error : std::uint8_t {
 // NUL terminated, safe for %s. An unknown value gives "unknown".
 [[nodiscard]] const char *error_name(Error error) noexcept;
 
+// WGS84 latitude and longitude in degrees.
 struct Degrees {
   double latitude;
   double longitude;
@@ -57,6 +58,8 @@ struct E7 {
   std::int64_t longitude;
 };
 
+// True for a valid H3 cell, from H3 isValidCell. False for 0 and for any
+// directed edge, vertex or malformed index.
 [[nodiscard]] bool valid_cell(Cell cell) noexcept;
 
 // 0..15 for a valid cell, otherwise Error::InvalidCell.
@@ -87,7 +90,8 @@ format_cell(Cell cell, std::span<char, kCellTextBytes> out) noexcept;
 [[nodiscard]] std::expected<Cell, Error> parent_at(Cell input,
                                                    int resolution) noexcept;
 
-// WGS84 center of the cell, from H3 cellToLatLng.
+// WGS84 center of the cell, from H3 cellToLatLng. center_e7 gives the same
+// center in E7 units.
 [[nodiscard]] std::expected<Degrees, Error> center_degrees(Cell cell) noexcept;
 [[nodiscard]] std::expected<E7, Error> center_e7(Cell cell) noexcept;
 

@@ -23,7 +23,9 @@ consumer, for example the OpenSensor firmware, never to this repo.
   `std::span` for buffers. `std::string_view` for text, and never pass its
   `.data()` to a C API that wants a NUL, copy it first.
 - No exceptions, no RTTI, no heap, no `std::format`, no iostream. Constant
-  tables are `static constexpr`, checked with `consteval` where possible.
+  tables are `constexpr` so they sit in flash `.rodata`, `inline constexpr` in
+  a header such as `src/iso_alpha2.h` and `static constexpr` in a source file.
+  They are checked with `consteval` where possible.
 - Designated initializers in declaration order. `enum class` with
   `using enum` where it reads better.
 - Never use `__FILE__` in our code. H3's `assert()` still does, the path map

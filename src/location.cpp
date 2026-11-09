@@ -2,6 +2,7 @@
 // Copyright (c) 2025-2026 Walkthru.Earth (https://walkthru.earth)
 #include <embedded_h3/location.h>
 
+#include "e7.h"
 #include "h3_error.h"
 #include "iso_alpha2.h"
 
@@ -45,6 +46,11 @@ Error from_h3_error(std::uint32_t code) noexcept {
   default:
     return Error::H3Failure;
   }
+}
+
+E7 to_e7(Degrees degrees) noexcept {
+  return E7{.latitude = std::llround(degrees.latitude * 1e7),
+            .longitude = std::llround(degrees.longitude * 1e7)};
 }
 } // namespace detail
 
@@ -143,10 +149,7 @@ std::expected<Degrees, Error> center_degrees(Cell cell) noexcept {
 }
 
 std::expected<E7, Error> center_e7(Cell cell) noexcept {
-  return center_degrees(cell).transform([](const Degrees &center) noexcept {
-    return E7{.latitude = std::llround(center.latitude * 1e7),
-              .longitude = std::llround(center.longitude * 1e7)};
-  });
+  return center_degrees(cell).transform(detail::to_e7);
 }
 
 std::expected<Cell, Error> from_degrees(double latitude, double longitude,

@@ -76,9 +76,16 @@ guards = [
      "  if (!valid_cell(input))\n    return unexpected(Error::InvalidCell);\n  if (!valid_resolution(target))\n    return unexpected(Error::InvalidResolution);\n"),
     ("center_degrees skips the cell check",
      "  if (!valid_cell(cell))\n    return unexpected(Error::InvalidCell);\n  LatLng center", "  LatLng center"),
-    ("center_e7 truncates instead of rounding",
-     "std::llround(center.latitude * 1e7)",
-     "static_cast<std::int64_t>(center.latitude * 1e7)"),
+    ("to_e7 truncates the latitude",
+     "std::llround(degrees.latitude * 1e7)",
+     "static_cast<std::int64_t>(degrees.latitude * 1e7)"),
+    ("to_e7 rounds the latitude half to even",
+     "std::llround(degrees.latitude * 1e7)", "std::llrint(degrees.latitude * 1e7)"),
+    ("to_e7 rounds the longitude half to even",
+     "std::llround(degrees.longitude * 1e7)", "std::llrint(degrees.longitude * 1e7)"),
+    ("to_e7 rounds the latitude half up",
+     "std::llround(degrees.latitude * 1e7)",
+     "std::llround(std::floor(degrees.latitude * 1e7 + 0.5))"),
     ("from_degrees skips the latitude finite check",
      "!std::isfinite(latitude) || ", ""),
     ("from_degrees skips the longitude finite check",
@@ -144,6 +151,11 @@ def run(old, new):
     if original.count(old) != 1:
         sys.exit(f"mutation text not found exactly once: {old!r}")
     source.write_text(original.replace(old, new))
+    # Make 3.81 compares mtimes in whole seconds, so a mutant written within
+    # the same second as the last build can look up to date. Deleting the
+    # object forces a rebuild under both make and Ninja.
+    for obj in (work / "build").rglob("location.cpp.o*"):
+        obj.unlink()
     build = subprocess.run(["cmake", "--build", str(work / "build"), "--parallel"],
                            capture_output=True)
     if build.returncode != 0:

@@ -2,6 +2,7 @@
 // Copyright (c) 2025-2026 Walkthru.Earth (https://walkthru.earth)
 #include <embedded_h3/location.h>
 
+#include "e7.h"
 #include "h3_error.h"
 #include "iso_alpha2.h"
 
@@ -394,6 +395,34 @@ constexpr std::array<std::string_view, 26> kAssignedBySecondLetter = {
     "AMW",                     // Z
 };
 
+// Inputs whose product with 1e7 is exactly k + 0.5 in binary64, checked
+// below, so the rounding rule decides the result. Half away from zero gives
+// 1, 2, 3 and 1234568, where half to even would give 0, 2, 2 and 1234568,
+// and truncation would give 0, 1, 2 and 1234567.
+void e7_halfway() {
+  struct Case {
+    double degrees;
+    std::int64_t e7;
+  };
+  constexpr std::array<Case, 5> cases{{
+      {.degrees = 0.5e-7, .e7 = 1},
+      {.degrees = 1.5e-7, .e7 = 2},
+      {.degrees = 2.5e-7, .e7 = 3},
+      {.degrees = 0.12345675, .e7 = 1234568},
+      {.degrees = 45.00000025, .e7 = 450000003},
+  }};
+  for (const Case &c : cases) {
+    const double scaled = c.degrees * 1e7;
+    CHECK(scaled - std::floor(scaled) == 0.5);
+    for (const double sign : {1.0, -1.0}) {
+      const auto e7 = loc::detail::to_e7(
+          {.latitude = sign * c.degrees, .longitude = -sign * c.degrees});
+      CHECK(e7.latitude == static_cast<std::int64_t>(sign) * c.e7);
+      CHECK(e7.longitude == -static_cast<std::int64_t>(sign) * c.e7);
+    }
+  }
+}
+
 void countries() {
   // Every uppercase pair, 676 in all, matches the snapshot exactly. A swapped,
   // missing or extra code in the library table fails here.
@@ -453,6 +482,7 @@ int main() {
   pentagons();
   coarsen_monotonicity();
   parent_at_fixed_resolution();
+  e7_halfway();
   countries();
   std::puts("test_location: ALL TESTS PASSED");
   return 0;

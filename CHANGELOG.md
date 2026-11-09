@@ -48,6 +48,8 @@ Not tagged yet. Only the owner tags a release.
   manifest does not list.
 - A country test that compares all 676 uppercase pairs with an independent
   snapshot from Debian iso-codes v4.20.1.
+- E7 tests for values exactly halfway between two steps, positive and
+  negative, which pin rounding half away from zero.
 - CI jobs for the mutation proof and a two path reproducible build. Actions
   are pinned by SHA and the ESP-IDF image by digest.
 - `.clangd`, `CMakePresets.json`, `AGENTS.md` and this changelog.

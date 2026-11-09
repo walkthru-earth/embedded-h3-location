@@ -241,7 +241,7 @@ Walkthru.Earth code in this repository (`include/`, `src/`, `tests/`, `tools/`, 
 >
 > *"Spatial indexing and privacy coarsening by [Walkthru.Earth](https://walkthru.earth) (`walkthru-earth/embedded-h3-location`), licensed under CC-BY-4.0."*
 
-The component manifest declares `license: "CC-BY-4.0 AND Apache-2.0"` for both parts.
+The component manifest declares `license: "CC-BY-4.0 AND Apache-2.0"` for both parts. The [manifest reference](https://docs.espressif.com/projects/idf-component-manager/en/latest/reference/manifest_file.html#license) asks for an SPDX license identifier, and this value is an SPDX expression. The registry accepts expressions in practice. Espressif's own `espressif/quickjs-ng` 0.14.0 declares `license: MIT AND Apache-2.0` in its `idf_component.yml`, and the registry API lists it with that name, checked on 2026-11-09. `vendor/h3/` keeps Apache-2.0 with its own `LICENSE` and `NOTICE` either way.
 
 ### Third-party notices
 
