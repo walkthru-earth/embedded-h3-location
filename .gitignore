@@ -8,6 +8,8 @@ cmake-build-*/
 *.a
 *.dSYM/
 test_location
+test_multipolygon
+test_multipolygon_malloc
 # ESP-IDF example
 sdkconfig
 sdkconfig.old

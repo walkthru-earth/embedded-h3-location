@@ -1,0 +1,16 @@
+menu "embedded-h3-location"
+
+    config EMBEDDED_H3_LOCATION_ALLOC_PREFIX
+        string "Prefix for the allocator H3 calls"
+        default ""
+        help
+            H3 allocates only inside cells_to_multipolygon, through H3_MEMORY
+            in the vendored H3 alloc.h. Empty means plain malloc, calloc,
+            realloc and free. A prefix such as my_h3_ makes H3 call
+            my_h3_malloc, my_h3_calloc, my_h3_realloc and my_h3_free instead.
+            The application defines all four with C linkage and libc
+            semantics, for example over heap_caps_malloc to choose PSRAM. The
+            prefix must start with a letter or underscore and hold only
+            letters, digits and underscores.
+
+endmenu

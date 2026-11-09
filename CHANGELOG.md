@@ -53,6 +53,39 @@ Not tagged yet. Only the owner tags a release.
 - CI jobs for the mutation proof and a two path reproducible build. Actions
   are pinned by SHA and the ESP-IDF image by digest.
 - `.clangd`, `CMakePresets.json`, `AGENTS.md` and this changelog.
+- `cells_to_multipolygon()` outlines a set of cells of one resolution as a
+  multipolygon of polygons, rings and points, written into caller spans.
+  `multipolygon_capacity()` gives span sizes that always fit, and any size
+  cap stays a caller argument. It wraps H3's internal `cellsToMultiPolygon`,
+  the only allocating call in the library, and frees the H3 result before it
+  returns.
+- Eight `Error` values for outlines, `NoCells`, `MixedResolution`,
+  `DuplicateCell`, `TooManyCells`, `OutOfMemory`, `PointBufferFull`,
+  `RingBufferFull` and `PolygonBufferFull`.
+- The consumer chooses H3's allocator. Kconfig
+  `EMBEDDED_H3_LOCATION_ALLOC_PREFIX` under ESP-IDF, or the CMake cache
+  variable of the same name on host, compiles H3 with `H3_ALLOC_PREFIX`.
+  Empty keeps plain `malloc`. The example shows PSRAM capable hooks over
+  `heap_caps_malloc`.
+- Outline tests compare 362 random, pentagon and pole cell sets bit for bit
+  with H3's linked list result. They cover pentagons at every odd
+  resolution, holes, the whole globe and every full buffer. A counting
+  allocator fails each H3 allocation in turn, for a normal set and for the
+  globe. The mutation proof now covers the outline code and the header. Host
+  tests also run with a consumer allocator prefix set.
+- `nonzero_alloc_size()` for allocator hooks. H3 asks for zero bytes on the
+  whole globe, and ESP-IDF 6.1 returns NULL for zero bytes, so hooks that
+  pass the size straight through turned the globe into `OutOfMemory`. The
+  README snippet and the example round zero up to 1 byte. A host test models
+  a NULL on zero allocator and proves the globe fails without the rounding
+  and succeeds with it. Plain `malloc` on ESP-IDF 6.1 has the same zero size
+  behavior, see the README.
+- `EMBEDDED_H3_LOCATION_VERSION_MAJOR`, `_MINOR`, `_PATCH` and `_STRING`
+  macros and `kVersion` constants in the public header. Configuring the host
+  build fails when they disagree with `project(VERSION)`, `idf_component.yml`
+  or the newest `CHANGELOG.md` heading.
+- CI builds the example a second time with the allocator prefix and checks
+  with `nm` which allocator the library calls in both builds.
 
 ### H3
 
@@ -74,5 +107,6 @@ Not tagged yet. Only the owner tags a release.
   with SHA-256 checked vendoring, cell coarsening, cell text, centers and
   ISO 3166-1 alpha-2 validation. ESP-IDF component and CMake library.
 
+<!-- At tag time the 2.0.0 link becomes compare/v1.0.0...v2.0.0, see AGENTS.md Releases. -->
 [2.0.0]: https://github.com/walkthru-earth/embedded-h3-location/compare/v1.0.0...v2-cpp23
 [1.0.0]: https://github.com/walkthru-earth/embedded-h3-location/releases/tag/v1.0.0

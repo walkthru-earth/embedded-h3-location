@@ -11,6 +11,7 @@
 #include <array>
 #include <climits>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -71,14 +72,35 @@ struct Lcg {
   }
 };
 
+// The constants mirror the macros, and the string is MAJOR.MINOR.PATCH. CMake
+// checks the macros against the project, manifest and changelog versions.
+void version() {
+  static_assert(loc::kVersionMajor == EMBEDDED_H3_LOCATION_VERSION_MAJOR);
+  static_assert(loc::kVersionMinor == EMBEDDED_H3_LOCATION_VERSION_MINOR);
+  static_assert(loc::kVersionPatch == EMBEDDED_H3_LOCATION_VERSION_PATCH);
+  std::array<char, 32> text{};
+  const int length =
+      std::snprintf(text.data(), text.size(), "%d.%d.%d", loc::kVersionMajor,
+                    loc::kVersionMinor, loc::kVersionPatch);
+  CHECK(length > 0 && static_cast<std::size_t>(length) < text.size());
+  CHECK(loc::kVersion ==
+        std::string_view(text.data(), static_cast<std::size_t>(length)));
+  CHECK(loc::kVersion == std::string_view(EMBEDDED_H3_LOCATION_VERSION_STRING));
+}
+
 void error_names() {
-  constexpr std::array all{Error::InvalidCell, Error::InvalidResolution,
-                           Error::OutOfRange,  Error::NonFinite,
-                           Error::InvalidText, Error::H3Failure,
-                           Error::TooCoarse};
+  constexpr std::array all{
+      Error::InvalidCell,     Error::InvalidResolution, Error::OutOfRange,
+      Error::NonFinite,       Error::InvalidText,       Error::H3Failure,
+      Error::TooCoarse,       Error::NoCells,           Error::MixedResolution,
+      Error::DuplicateCell,   Error::TooManyCells,      Error::OutOfMemory,
+      Error::PointBufferFull, Error::RingBufferFull,    Error::PolygonBufferFull};
   constexpr std::array<std::string_view, all.size()> names{
-      "invalid_cell", "invalid_resolution", "out_of_range", "non_finite",
-      "invalid_text", "h3_failure",         "too_coarse"};
+      "invalid_cell",      "invalid_resolution", "out_of_range",
+      "non_finite",        "invalid_text",       "h3_failure",
+      "too_coarse",        "no_cells",           "mixed_resolution",
+      "duplicate_cell",    "too_many_cells",     "out_of_memory",
+      "point_buffer_full", "ring_buffer_full",   "polygon_buffer_full"};
   for (std::size_t i = 0; i < all.size(); ++i) {
     CHECK(static_cast<std::size_t>(std::to_underlying(all[i])) == i + 1); // no zero, no success value
     CHECK(names[i] == loc::error_name(all[i]));
@@ -93,9 +115,15 @@ void h3_error_mapping() {
   CHECK(from_h3_error(E_CELL_INVALID) == Error::InvalidCell);
   CHECK(from_h3_error(E_RES_DOMAIN) == Error::InvalidResolution);
   CHECK(from_h3_error(E_LATLNG_DOMAIN) == Error::OutOfRange);
+  CHECK(from_h3_error(E_RES_MISMATCH) == Error::MixedResolution);
+  CHECK(from_h3_error(E_DUPLICATE_INPUT) == Error::DuplicateCell);
+  CHECK(from_h3_error(E_MEMORY_BOUNDS) == Error::TooManyCells);
+  CHECK(from_h3_error(E_MEMORY_ALLOC) == Error::OutOfMemory);
   for (std::uint32_t code = 0; code < H3_ERROR_END + 2; ++code) {
     if (code == E_CELL_INVALID || code == E_RES_DOMAIN ||
-        code == E_LATLNG_DOMAIN)
+        code == E_LATLNG_DOMAIN || code == E_RES_MISMATCH ||
+        code == E_DUPLICATE_INPUT || code == E_MEMORY_BOUNDS ||
+        code == E_MEMORY_ALLOC)
       continue;
     CHECK(from_h3_error(code) == Error::H3Failure);
   }
@@ -366,7 +394,7 @@ void parent_at_fixed_resolution() {
 // holds the second letters of the codes that start with letter n. The layout
 // differs from src/iso_alpha2.h on purpose, so one copy error cannot hide in
 // both.
-constexpr std::array<std::string_view, 26> kAssignedBySecondLetter = {
+constexpr std::array<std::string_view, 26> kSecondLettersByFirstLetter = {
     "DEFGILMOQRSTUWXZ",        // A
     "ABDEFGHIJLMNOQRSTVWYZ",   // B
     "ACDFGHIKLMNORUVWXYZ",     // C
@@ -432,7 +460,7 @@ void countries() {
       const std::array<char, 2> pair{first, second};
       const std::string_view code{pair.data(), pair.size()};
       const bool assigned =
-          kAssignedBySecondLetter[static_cast<std::size_t>(first - 'A')].find(
+          kSecondLettersByFirstLetter[static_cast<std::size_t>(first - 'A')].find(
               second) != std::string_view::npos;
       CHECK(loc::valid_country(code) == assigned);
       accepted += assigned ? 1 : 0;
@@ -467,11 +495,14 @@ static_assert(noexcept(loc::center_e7(0)));
 static_assert(noexcept(loc::from_degrees(0, 0, 0)));
 static_assert(noexcept(loc::valid_country(std::string_view{})));
 static_assert(noexcept(loc::error_name(Error::InvalidCell)));
+static_assert(noexcept(loc::multipolygon_capacity(0, 0)));
+static_assert(noexcept(loc::cells_to_multipolygon({}, {}, {}, {})));
 static_assert(std::is_same_v<std::underlying_type_t<Error>, std::uint8_t>);
 
 } // namespace
 
 int main() {
+  version();
   error_names();
   h3_error_mapping();
   official_fixtures();
