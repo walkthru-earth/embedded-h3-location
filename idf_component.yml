@@ -1,9 +1,10 @@
-version: "1.0.0"
-description: "Privacy-preserving Uber H3 v4.5.0 spatial indexing, cell coarsening, and ISO-3166 country validation for ESP-IDF and embedded C/C++17"
+version: "2.0.0"
+description: "C++23 std::expected wrapper around official Uber H3 v4.5.0 for ESP-IDF. Cell coarsening to a caller chosen resolution, cell text, centers and ISO 3166-1 alpha-2 checks. No heap, no exceptions."
 url: "https://github.com/walkthru-earth/embedded-h3-location"
 repository: "https://github.com/walkthru-earth/embedded-h3-location.git"
 documentation: "https://github.com/walkthru-earth/embedded-h3-location#readme"
 issues: "https://github.com/walkthru-earth/embedded-h3-location/issues"
+changelog: "https://github.com/walkthru-earth/embedded-h3-location/blob/main/CHANGELOG.md"
 # Walkthru.Earth original code is CC-BY-4.0. Vendored Uber H3 under vendor/h3 is Apache-2.0.
 license: "CC-BY-4.0 AND Apache-2.0"
 maintainers:
@@ -15,15 +16,22 @@ tags:
   - privacy
   - iso3166
   - esp-idf
-# No targets list on purpose. Hardware verified on ESP32-S3 only, other chips
-# are pending hardware verification but are not blocked.
+  - cpp23
+# No targets list on purpose. Hardware verified on ESP32-S3 only. Other chips
+# are not verified and are not claimed, but are not blocked.
 dependencies:
+  # The public header needs C++23 std::expected, which ESP-IDF 6.1 ships.
   idf: ">=6.1"
 files:
   use_gitignore: true
   exclude:
     - "build/**"
+    - "build-*/**"
     - ".github/**"
+    - ".clangd"
+    - "CMakePresets.json"
+    - "tools/**"
+    - "tests/**"
     - "examples/**/build/**"
     - "examples/**/managed_components/**"
     - "examples/**/sdkconfig"

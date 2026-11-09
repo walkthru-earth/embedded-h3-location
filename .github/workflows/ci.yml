@@ -6,20 +6,34 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [main]
+  schedule:
+    # Weekly H3 release check, Mondays 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Every action is pinned by full commit SHA. The container is pinned by digest
+# to ESP-IDF v6.1, the same IDF the OpenSensor firmware pins in
+# tools/idf-dependencies.lock. The job checks the commit below inside it.
+env:
+  IDF_EXPECTED_COMMIT: fff9895c82d744c7237be8847347bdd1b07c6643
+
 jobs:
   host-tests:
-    name: Host tests (${{ matrix.build_type }}, ASan + UBSan)
-    runs-on: ubuntu-latest
+    name: Host tests (${{ matrix.build_type }}, GCC 14, ASan + UBSan)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         build_type: [Debug, Release]
+    env:
+      CC: gcc-14
+      CXX: g++-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Configure
@@ -33,19 +47,41 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  mutation:
+    name: Mutation proof (every guard killed)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run tools/mutation_test.sh
+        run: tools/mutation_test.sh Debug
+
   esp-idf-build:
     name: ESP-IDF v6.1 build (${{ matrix.target }})
-    runs-on: ubuntu-latest
-    container: espressif/idf:v6.1
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c
     strategy:
       fail-fast: false
       matrix:
-        # Only ESP32-S3 is hardware verified. Other targets are pending.
+        # Only ESP32-S3 is hardware verified. No other target is claimed.
         target: [esp32s3]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check the container IDF commit
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$IDF_PATH"
+          actual="$(git -C "$IDF_PATH" rev-parse HEAD)"
+          echo "IDF_PATH HEAD $actual"
+          test "$actual" = "$IDF_EXPECTED_COMMIT"
       - name: Build examples/basic
         shell: bash
         run: |
@@ -53,3 +89,66 @@ jobs:
           cd examples/basic
           idf.py set-target ${{ matrix.target }}
           idf.py build
+      - name: Check the dialect pin
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          db = json.load(open("examples/basic/build/compile_commands.json"))
+          entry = next(e for e in db if e["file"].endswith("src/location.cpp"))
+          stds = [a for a in entry["command"].split() if a.startswith("-std=")]
+          print("location.cpp", stds)
+          assert stds and stds[-1] == "-std=gnu++23", stds
+          PY
+
+  reproducible:
+    name: Reproducible image (two checkout paths)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build examples/basic from two paths and compare
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          # The component manager resolves override_path by the leaf
+          # directory name, so both copies keep embedded-h3-location.
+          for dir in /tmp/a /tmp/second-longer-checkout-path; do
+            mkdir -p "$dir/embedded-h3-location"
+            cp -R CMakeLists.txt include src vendor examples idf_component.yml \
+              LICENSE NOTICE "$dir/embedded-h3-location/"
+            (cd "$dir/embedded-h3-location/examples/basic" \
+              && idf.py set-target esp32s3 && idf.py build)
+          done
+          name=embedded_h3_location_basic
+          one=/tmp/a/embedded-h3-location/examples/basic/build
+          two=/tmp/second-longer-checkout-path/embedded-h3-location/examples/basic/build
+          sha256sum "$one/$name.bin" "$two/$name.bin"
+          cmp "$one/$name.bin" "$two/$name.bin"
+          for file in "$one/$name.bin" "$one/$name.elf" "$two/$name.bin" "$two/$name.elf"; do
+            if grep -q -a -F -e /tmp/a/ -e /tmp/second-longer-checkout-path/ "$file"; then
+              echo "checkout path found in $file"
+              exit 1
+            fi
+          done
+          echo "identical images, no checkout path in either .bin or .elf"
+
+  h3-release:
+    name: Newer uber/h3 release check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compare vendor/h3/VERSION with the newest release tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            tools/check_h3_release.sh --strict
+          else
+            tools/check_h3_release.sh
+          fi
