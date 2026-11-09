@@ -13,7 +13,8 @@ Not tagged yet. Only the owner tags a release.
 
 - Breaking. The API moved to C++23. Every fallible call returns
   `std::expected<T, embedded_h3::location::Error>` in place of `bool` and an
-  out parameter. Consumers need C++23 or later.
+  out parameter. Consumers need C++23 with `__cpp_lib_expected >= 202211L`,
+  for example GCC 13 or LLVM 17 libc++. GCC 12 is refused by the header.
 - Breaking. The header is now `<embedded_h3/location.h>` and the namespace is
   `embedded_h3::location`. `aq_location.h` and `aq::location` are gone, with
   no aliases. The CMake target and component name did not change.
@@ -40,8 +41,13 @@ Not tagged yet. Only the owner tags a release.
   coordinate bounds, pentagons and coarsening monotonicity.
 - `tools/mutation_test.sh`, a mutation proof for each guard.
 - `tools/vendor_h3.sh` to vendor an H3 release tag and rewrite the manifest.
+  It stages the new tree and swaps it in only after a full copy.
 - `tools/check_h3_release.sh` and a weekly CI job that fails once uber/h3 has
-  a newer release.
+  a newer release or cannot be reached. Pull requests only get a warning.
+- The CMake manifest check also stops on any file in `vendor/h3` that the
+  manifest does not list.
+- A country test that compares all 676 uppercase pairs with an independent
+  snapshot from Debian iso-codes v4.20.1.
 - CI jobs for the mutation proof and a two path reproducible build. Actions
   are pinned by SHA and the ESP-IDF image by digest.
 - `.clangd`, `CMakePresets.json`, `AGENTS.md` and this changelog.

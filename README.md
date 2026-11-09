@@ -24,6 +24,8 @@ The manifest has no `targets` list, so other chips are not blocked. Only ESP32-S
 | GCC 14, `-std=c++23` | CI host tests and mutation proof on Ubuntu 24.04 |
 | Clang 23 with libc++, `-std=c++23` | Local host tests on macOS |
 
+The header needs `__cpp_lib_expected >= 202211L`, the C++23 `std::expected` with monadic operations such as `transform` and `and_then`. libstdc++ defines that value from GCC 13 and libc++ from LLVM 17. GCC 12 defines only `202202L` and stops at the `#error` in the header. GCC 13 and LLVM 17 were not run here, the table above lists what did run.
+
 ## What the library does
 
 ```mermaid
@@ -52,7 +54,7 @@ flowchart LR
 - **The limit is yours.** The library has no default resolution. A consumer such as the OpenSensor firmware sets its own rule, for example resolution 8.
 - **Store only the coarse cell.** Derive any public coordinate from that cell. A cell center is not the original position.
 - **The country is declared, not derived.** `valid_country()` checks the code against the 249 assigned ISO 3166-1 alpha-2 codes. H3 is not a country lookup.
-- **Official H3, unmodified.** Uber H3 v4.5.0 lives in `vendor/h3/`. CMake checks every file against `vendor/h3/manifest.json` before it builds.
+- **Official H3, unmodified.** Uber H3 v4.5.0 lives in `vendor/h3/`. CMake checks the SHA-256 of every file listed in `vendor/h3/manifest.json` and stops when `vendor/h3/` holds a file the manifest does not list, apart from macOS `.DS_Store`.
 
 ```mermaid
 sequenceDiagram
@@ -229,7 +231,7 @@ The newest uber/h3 release is v4.5.0, so that is what we vendor. We never vendor
 | Out of bounds read in `_baseCellToCCWrot60` when `face == NUM_ICOSA_FACES` | [#1224](https://github.com/uber/h3/pull/1224) | Only the vertex functions call it, and our API does not |
 | `dirFaces` initialized in `vertexRotations` | [#1273](https://github.com/uber/h3/pull/1273) | A compiler warning fix in vertex code we do not call |
 
-`tools/check_h3_release.sh` runs in CI on every pull request and fails the weekly scheduled run once a newer release exists.
+`tools/check_h3_release.sh` runs in CI on every pull request and fails the weekly scheduled run once a newer release exists. On a pull request it only warns, also when GitHub cannot be reached. The weekly run fails in both cases.
 
 ## License and attribution
 

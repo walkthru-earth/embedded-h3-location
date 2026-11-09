@@ -3,13 +3,21 @@ cmake_minimum_required(VERSION 3.20)
 
 # Verify every vendored official Uber H3 file against its SHA-256 manifest
 # before configuring the upstream public header. No host code generators.
+# vendor/h3 must hold exactly the listed files plus manifest.json, so an
+# unlisted header cannot be picked up from the include path.
 set(h3_root "${CMAKE_CURRENT_LIST_DIR}/vendor/h3")
 file(READ "${h3_root}/manifest.json" h3_manifest)
 string(JSON h3_count LENGTH "${h3_manifest}" files)
 math(EXPR h3_last "${h3_count} - 1")
+file(GLOB_RECURSE h3_present LIST_DIRECTORIES false RELATIVE "${h3_root}"
+     "${h3_root}/*")
+list(REMOVE_ITEM h3_present "manifest.json")
+# Finder writes .DS_Store when a folder is opened on macOS. It is never built.
+list(FILTER h3_present EXCLUDE REGEX "(^|/)\\.DS_Store$")
 set(h3_sources "")
 foreach(index RANGE ${h3_last})
     string(JSON name MEMBER "${h3_manifest}" files ${index})
+    list(REMOVE_ITEM h3_present "${name}")
     string(JSON expected GET "${h3_manifest}" files "${name}")
     file(SHA256 "${h3_root}/${name}" actual)
     if(NOT actual STREQUAL expected)
@@ -21,6 +29,10 @@ foreach(index RANGE ${h3_last})
         list(APPEND h3_sources "${h3_root}/${name}")
     endif()
 endforeach()
+if(h3_present)
+    list(JOIN h3_present ", " h3_unlisted)
+    message(FATAL_ERROR "Vendored H3 file not in manifest.json: ${h3_unlisted}")
+endif()
 
 # The header version comes from the verified upstream VERSION file.
 file(STRINGS "${h3_root}/VERSION" h3_version LIMIT_COUNT 1)

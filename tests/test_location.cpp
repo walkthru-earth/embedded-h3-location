@@ -358,9 +358,59 @@ void parent_at_fixed_resolution() {
   CHECK(fails_with(loc::parent_at(0x85283083fffffffULL, 8), Error::TooCoarse));
 }
 
+// Independent snapshot of the 249 assigned ISO 3166-1 alpha-2 codes, from
+// Debian iso-codes v4.20.1 data/iso_3166-1.json (tag commit
+// 74623235ae99f6e835e1e465017ce4c544ae6b53, file SHA-256
+// f01b812b57fba9f31ff621bf33e7c7570a01964dbeb5be2167e94decf538c89f). Row n
+// holds the second letters of the codes that start with letter n. The layout
+// differs from src/iso_alpha2.h on purpose, so one copy error cannot hide in
+// both.
+constexpr std::array<std::string_view, 26> kAssignedBySecondLetter = {
+    "DEFGILMOQRSTUWXZ",        // A
+    "ABDEFGHIJLMNOQRSTVWYZ",   // B
+    "ACDFGHIKLMNORUVWXYZ",     // C
+    "EJKMOZ",                  // D
+    "CEGHRST",                 // E
+    "IJKMOR",                  // F
+    "ABDEFGHILMNPQRSTUWY",     // G
+    "KMNRTU",                  // H
+    "DELMNOQRST",              // I
+    "EMOP",                    // J
+    "EGHIMNPRWYZ",             // K
+    "ABCIKRSTUVY",             // L
+    "ACDEFGHKLMNOPQRSTUVWXYZ", // M
+    "ACEFGILOPRUZ",            // N
+    "M",                       // O
+    "AEFGHKLMNRSTWY",          // P
+    "A",                       // Q
+    "EOSUW",                   // R
+    "ABCDEGHIJKLMNORSTVXYZ",   // S
+    "CDFGHJKLMNORTVWZ",        // T
+    "AGMSYZ",                  // U
+    "ACEGINU",                 // V
+    "FS",                      // W
+    "",                        // X
+    "ET",                      // Y
+    "AMW",                     // Z
+};
+
 void countries() {
-  for (std::size_t i = 0; i < loc::detail::kIsoAlpha2.size(); i += 2)
-    CHECK(loc::valid_country(loc::detail::kIsoAlpha2.substr(i, 2)));
+  // Every uppercase pair, 676 in all, matches the snapshot exactly. A swapped,
+  // missing or extra code in the library table fails here.
+  std::size_t accepted = 0;
+  for (char first = 'A'; first <= 'Z'; ++first) {
+    for (char second = 'A'; second <= 'Z'; ++second) {
+      const std::array<char, 2> pair{first, second};
+      const std::string_view code{pair.data(), pair.size()};
+      const bool assigned =
+          kAssignedBySecondLetter[static_cast<std::size_t>(first - 'A')].find(
+              second) != std::string_view::npos;
+      CHECK(loc::valid_country(code) == assigned);
+      accepted += assigned ? 1 : 0;
+    }
+  }
+  CHECK(accepted == 249);
+  CHECK(accepted == loc::detail::kIsoAlpha2Count);
   for (std::string_view code : {"EG", "US", "TW", "BQ", "SS", "GB", "AQ", "ZW"})
     CHECK(loc::valid_country(code));
   for (std::string_view code :

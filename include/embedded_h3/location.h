@@ -4,8 +4,11 @@
 
 #include <version>
 
-#if !defined(__cpp_lib_expected) || __cpp_lib_expected < 202202L
-#error "embedded-h3-location needs C++23 std::expected, build with -std=c++23 or gnu++23"
+// 202211L adds the monadic operations (P2505R5) that the source and the
+// examples use, such as transform and and_then. libstdc++ from GCC 13 and
+// libc++ from LLVM 17 define it. GCC 12 defines only 202202L.
+#if !defined(__cpp_lib_expected) || __cpp_lib_expected < 202211L
+#error "embedded-h3-location needs C++23 std::expected with monadic operations (__cpp_lib_expected >= 202211L), such as GCC 13 or LLVM 17 libc++"
 #endif
 
 #include <cstddef>

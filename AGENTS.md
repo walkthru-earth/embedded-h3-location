@@ -12,7 +12,8 @@ consumer, for example the OpenSensor firmware, never to this repo.
 
 ## C++ rules
 
-- C++23. `CXX_STANDARD 23` with `CXX_STANDARD_REQUIRED` in both paths. Under
+- C++23 with `__cpp_lib_expected >= 202211L` (GCC 13, LLVM 17 libc++), checked
+  by the header. `CXX_STANDARD 23` with `CXX_STANDARD_REQUIRED` in both paths. Under
   ESP-IDF the component also appends `-std=gnu++23` last, because IDF 6.1
   adds `gnu++26` build wide. CI checks the last `-std` flag. Not C++26 yet.
 - Fallible calls return `std::expected<T, Error>`. `Error` is an error only
@@ -31,8 +32,9 @@ consumer, for example the OpenSensor firmware, never to this repo.
 ## Vendored H3
 
 - `vendor/h3/` holds unmodified files from an official uber/h3 release tag,
-  now v4.5.0. CMake checks each file against `vendor/h3/manifest.json` and
-  compiles only the `.c` files the manifest lists.
+  now v4.5.0. CMake checks each file against `vendor/h3/manifest.json`,
+  stops on any unlisted file apart from `.DS_Store`, and compiles only the
+  `.c` files the manifest lists.
 - Never vendor `master` or a branch, even for a known fix. Unreleased fixes
   are listed in `README.md` and `CHANGELOG.md` until a release ships them.
 - `tools/check_h3_release.sh` warns on pull requests and fails the weekly CI
@@ -42,7 +44,8 @@ Upgrade steps.
 
 1. Read the upstream `CHANGELOG.md` for the new tag.
 2. Run `tools/vendor_h3.sh vX.Y.Z`. It accepts only release tags, checks
-   `VERSION` and rewrites the manifest.
+   `VERSION`, stages the new tree next to `vendor/h3` and swaps it in only
+   after every copy and the manifest succeed.
 3. Review `git diff vendor/`, then update `NOTICE`, `README.md`,
    `CHANGELOG.md` and this file.
 4. Run the gates below and the ESP-IDF example build.
