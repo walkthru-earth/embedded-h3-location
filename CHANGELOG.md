@@ -69,9 +69,10 @@ Not tagged yet. Only the owner tags a release.
   `heap_caps_malloc`.
 - Outline tests compare 362 random, pentagon and pole cell sets bit for bit
   with H3's linked list result. They cover pentagons at every odd
-  resolution, holes, the whole globe and every full buffer, and fail each H3
-  allocation in turn through a counting allocator. The mutation proof now covers the outline code and the
-  header.
+  resolution, holes, the whole globe and every full buffer. A counting
+  allocator fails each H3 allocation in turn, for a normal set and for the
+  globe. The mutation proof now covers the outline code and the header. Host
+  tests also run with a consumer allocator prefix set.
 - CI builds the example a second time with the allocator prefix and checks
   with `nm` which allocator the library calls in both builds.
 

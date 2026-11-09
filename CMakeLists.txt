@@ -171,15 +171,22 @@ endif()
 if(NOT ESP_PLATFORM AND CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(CTest)
     if(BUILD_TESTING)
-        # test_multipolygon_malloc needs the default library to call plain
-        # malloc, and test_multipolygon brings its own prefix.
-        if(NOT EMBEDDED_H3_LOCATION_ALLOC_PREFIX STREQUAL "")
-            message(FATAL_ERROR "The tests need EMBEDDED_H3_LOCATION_ALLOC_PREFIX empty")
+        # test_location and test_multipolygon_malloc need a library that calls
+        # plain malloc. With a consumer prefix set, the public library keeps
+        # that prefix and the tests get their own unprefixed copy.
+        if(EMBEDDED_H3_LOCATION_ALLOC_PREFIX STREQUAL "")
+            set(eh3l_malloc_library embedded_h3_location)
+        else()
+            set(eh3l_malloc_library embedded_h3_location_malloc)
+            embedded_h3_location_host_library(${eh3l_malloc_library} "")
         endif()
         # The same sources with the prefix eh3l_test_, so the counting
         # allocator in tests/test_multipolygon.cpp sees every H3 allocation.
         embedded_h3_location_host_library(embedded_h3_location_counted eh3l_test_)
-        foreach(library IN ITEMS embedded_h3_location embedded_h3_location_counted)
+        set(eh3l_libraries embedded_h3_location ${eh3l_malloc_library}
+            embedded_h3_location_counted)
+        list(REMOVE_DUPLICATES eh3l_libraries)
+        foreach(library IN LISTS eh3l_libraries)
             target_compile_options(${library} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Werror>")
         endforeach()
         function(embedded_h3_location_test name source library)
@@ -195,12 +202,12 @@ if(NOT ESP_PLATFORM AND CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
             add_test(NAME ${name} COMMAND ${name})
         endfunction()
         embedded_h3_location_test(test_location "tests/test_location.cpp"
-            embedded_h3_location)
+            ${eh3l_malloc_library})
         embedded_h3_location_test(test_multipolygon "tests/test_multipolygon.cpp"
             embedded_h3_location_counted)
         target_compile_definitions(test_multipolygon PRIVATE
             EMBEDDED_H3_LOCATION_TEST_COUNTING=1)
         embedded_h3_location_test(test_multipolygon_malloc
-            "tests/test_multipolygon.cpp" embedded_h3_location)
+            "tests/test_multipolygon.cpp" ${eh3l_malloc_library})
     endif()
 endif()

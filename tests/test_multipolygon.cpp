@@ -582,6 +582,21 @@ void malformed_output() {
   CHECK(copy().has_value());
 }
 
+// Fails each H3 allocation for one input in turn. Returns the count.
+std::size_t fail_each_allocation(const std::vector<Cell> &cells, int res) {
+  Buffers buffers(cells.size(), res);
+  reset_heap();
+  CHECK(run(cells, buffers).has_value());
+  const std::size_t total = heap.allocations;
+  CHECK(heap_clean());
+  for (std::size_t index = 0; index < total; ++index) {
+    reset_heap(index);
+    CHECK(fails_with(run(cells, buffers), Error::OutOfMemory));
+    CHECK(heap_clean());
+  }
+  return total;
+}
+
 void out_of_memory() {
   if constexpr (!kCounting) {
     std::puts("test_multipolygon_malloc: plain malloc, no counting checks");
@@ -592,20 +607,17 @@ void out_of_memory() {
   std::erase(cells, origin); // a hole
   cells.push_back(cell_at(30.0444, 31.2357, 8));
   std::ranges::sort(cells);
-  Buffers buffers(cells.size(), 8);
-  reset_heap();
-  CHECK(run(cells, buffers).has_value());
-  const std::size_t total = heap.allocations;
+  const std::size_t total = fail_each_allocation(cells, 8);
   CHECK(total > 4);
-  CHECK(heap_clean());
-  for (std::size_t index = 0; index < total; ++index) {
-    reset_heap(index);
-    CHECK(fails_with(run(cells, buffers), Error::OutOfMemory));
-    CHECK(heap_clean());
-  }
-  std::printf("test_multipolygon: %zu allocations, each one failed in turn, "
-              "no leak\n",
-              total);
+  // The whole globe takes its own H3 path, createGlobeMultiPolygon.
+  std::vector<Cell> globe(static_cast<std::size_t>(res0CellCount()));
+  CHECK(getRes0Cells(globe.data()) == E_SUCCESS);
+  std::ranges::sort(globe);
+  const std::size_t globe_total = fail_each_allocation(globe, 0);
+  CHECK(globe_total > 8);
+  std::printf("test_multipolygon: %zu and %zu globe allocations, each one "
+              "failed in turn, no leak\n",
+              total, globe_total);
 }
 
 // One random disk with about a third of its cells dropped, to make holes and
