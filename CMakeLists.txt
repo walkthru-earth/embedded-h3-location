@@ -40,17 +40,24 @@ configure_file("${h3_root}/h3lib/include/h3api.h.in"
 # that map paths themselves can turn this off.
 option(EMBEDDED_H3_LOCATION_MAP_PATHS
        "Map this checkout's paths to fixed names in macros and debug info" ON)
+# The checkout map is also public, because a consumer's debug info names the
+# public header's directory. It maps only this checkout. When the build
+# directory sits inside the checkout, GCC applies the last matching map, so
+# the build map comes last.
+set(embedded_h3_location_public_path_options "")
 set(embedded_h3_location_path_options "")
 if(EMBEDDED_H3_LOCATION_MAP_PATHS)
     get_filename_component(eh3l_source_real "${CMAKE_CURRENT_LIST_DIR}" REALPATH)
     get_filename_component(eh3l_binary_real "${CMAKE_CURRENT_BINARY_DIR}" REALPATH)
-    foreach(eh3l_map
-            "${CMAKE_CURRENT_LIST_DIR}=embedded-h3-location"
-            "${eh3l_source_real}=embedded-h3-location"
-            "${CMAKE_CURRENT_BINARY_DIR}=embedded-h3-location-build"
-            "${eh3l_binary_real}=embedded-h3-location-build")
-        list(APPEND embedded_h3_location_path_options "-ffile-prefix-map=${eh3l_map}")
+    foreach(eh3l_dir IN ITEMS "${CMAKE_CURRENT_LIST_DIR}" "${eh3l_source_real}")
+        list(APPEND embedded_h3_location_public_path_options
+             "-ffile-prefix-map=${eh3l_dir}=embedded-h3-location")
     endforeach()
+    foreach(eh3l_dir IN ITEMS "${CMAKE_CURRENT_BINARY_DIR}" "${eh3l_binary_real}")
+        list(APPEND embedded_h3_location_path_options
+             "-ffile-prefix-map=${eh3l_dir}=embedded-h3-location-build")
+    endforeach()
+    list(REMOVE_DUPLICATES embedded_h3_location_public_path_options)
     list(REMOVE_DUPLICATES embedded_h3_location_path_options)
 endif()
 
@@ -108,8 +115,9 @@ set_target_properties(${embedded_h3_location_target} PROPERTIES
     CXX_STANDARD 23
     CXX_STANDARD_REQUIRED ON)
 # Section GC drops the H3 functions this library does not call.
-target_compile_options(${embedded_h3_location_target} PRIVATE
-    -ffunction-sections -fdata-sections ${embedded_h3_location_path_options})
+target_compile_options(${embedded_h3_location_target}
+    PUBLIC ${embedded_h3_location_public_path_options}
+    PRIVATE -ffunction-sections -fdata-sections ${embedded_h3_location_path_options})
 
 if(NOT ESP_PLATFORM AND CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(CTest)
