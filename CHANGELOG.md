@@ -5,9 +5,7 @@ All notable changes to this project are listed here. The format follows
 [Semantic Versioning](https://semver.org/). The public API is
 `include/embedded_h3/location.h`.
 
-## [2.0.0] - Unreleased
-
-Not tagged yet. Only the owner tags a release.
+## [2.0.0] - 2026-11-09
 
 ### Changed
 
@@ -107,6 +105,5 @@ Not tagged yet. Only the owner tags a release.
   with SHA-256 checked vendoring, cell coarsening, cell text, centers and
   ISO 3166-1 alpha-2 validation. ESP-IDF component and CMake library.
 
-<!-- At tag time the 2.0.0 link becomes compare/v1.0.0...v2.0.0, see AGENTS.md Releases. -->
-[2.0.0]: https://github.com/walkthru-earth/embedded-h3-location/compare/v1.0.0...v2-cpp23
+[2.0.0]: https://github.com/walkthru-earth/embedded-h3-location/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/walkthru-earth/embedded-h3-location/releases/tag/v1.0.0
