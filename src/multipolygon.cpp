@@ -6,7 +6,7 @@
 
 #include <h3api.h>
 
-// cellsToMultiPolygon and destroyGeoMultiPolygon are internal in H3 4.5.0.
+// cellsToMultiPolygon and destroyGeoMultiPolygon are internal in H3 4.6.0.
 // cellsToMultiPoly.h declares them with "TODO: This will be moved to
 // h3api.h.in when it is ready to release". Including that header lets the
 // compiler check the declarations against the vendored source. Its inline

@@ -8,9 +8,9 @@
 // matches project(VERSION) in CMakeLists.txt, version in idf_component.yml and
 // the newest heading in CHANGELOG.md.
 #define EMBEDDED_H3_LOCATION_VERSION_MAJOR 2
-#define EMBEDDED_H3_LOCATION_VERSION_MINOR 0
+#define EMBEDDED_H3_LOCATION_VERSION_MINOR 1
 #define EMBEDDED_H3_LOCATION_VERSION_PATCH 0
-#define EMBEDDED_H3_LOCATION_VERSION_STRING "2.0.0"
+#define EMBEDDED_H3_LOCATION_VERSION_STRING "2.1.0"
 
 // 202211L adds the monadic operations (P2505R5) that the source and the
 // examples use, such as transform and and_then. libstdc++ from GCC 13 and
@@ -140,7 +140,7 @@ from_degrees(double latitude, double longitude, int resolution) noexcept;
 // how h3-js 4.5.0 converts. Each ring is closed, its last point equal to its
 // first. Every polygon has its outer ring first, then its holes. Outer rings
 // run counterclockwise and holes clockwise, and polygons come largest outer
-// ring first, all as H3 4.5.0 returns them.
+// ring first, all as H3 4.6.0 returns them.
 
 // Longitude and latitude in degrees.
 struct LngLat {
@@ -227,7 +227,7 @@ cells_to_multipolygon(std::span<const Cell> cells, std::span<LngLat> points,
 // The size an allocator hook should pass on, at least 1. H3 can ask for zero
 // bytes. For the whole globe it calls
 // H3_MEMORY(malloc)(sizeof(SortableLoop) * numLoops) with numLoops 0
-// (cellsToMultiPoly.c line 388 in H3 v4.5.0) before it takes the globe path
+// (cellsToMultiPoly.c line 388 in H3 v4.6.0) before it takes the globe path
 // (line 525), and it reads NULL as OutOfMemory. C lets malloc return NULL for
 // a zero size, and ESP-IDF 6.1 always does (heap_caps_base.c lines 113-116 at
 // commit fff9895c, reached by malloc, calloc, realloc and heap_caps_*). Pass

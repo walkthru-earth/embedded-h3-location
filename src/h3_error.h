@@ -12,6 +12,6 @@ namespace embedded_h3::location::detail {
 // cellsToMultiPolygon reports map to MixedResolution, DuplicateCell,
 // TooManyCells and OutOfMemory. Every other code, including E_SUCCESS passed
 // by mistake, maps to H3Failure. Private, the tests use it to reach codes that
-// checked input cannot trigger in H3 4.5.0.
+// checked input cannot trigger in H3 4.6.0.
 [[nodiscard]] Error from_h3_error(std::uint32_t code) noexcept;
 } // namespace embedded_h3::location::detail

@@ -3,7 +3,7 @@
 [![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://isocpp.org/)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-6.1%20on%20ESP32--S3-red.svg)](https://docs.espressif.com/projects/esp-idf/)
-[![Uber H3](https://img.shields.io/badge/Uber%20H3-v4.5.0-000000.svg)](https://github.com/uber/h3/releases/tag/v4.5.0)
+[![Uber H3](https://img.shields.io/badge/Uber%20H3-v4.6.0-000000.svg)](https://github.com/uber/h3/releases/tag/v4.6.0)
 
 A small C++23 layer over the official [Uber H3](https://github.com/uber/h3) C library for ESP-IDF and host builds. It indexes a position, coarsens a cell to a resolution the caller picks, prints and parses cell text, gives cell centers in degrees or $10^{-7}$ degrees, traces the outline of a set of cells as polygons, and checks ISO 3166-1 alpha-2 codes. Every fallible call returns `std::expected`. Nothing throws or keeps state. Only `cells_to_multipolygon` allocates, inside H3, and it frees all of it before it returns. The allocator H3 calls is yours to pick.
 
@@ -13,10 +13,10 @@ Built and maintained by **[Walkthru.Earth](https://walkthru.earth)** for privacy
 
 | Target | ESP-IDF | Status |
 | :--- | :--- | :--- |
-| ESP32-S3 | 6.1 (commit `fff9895c`) | The only target CI builds. v1.0.0 was verified on hardware. v2.0.0 has not run on a board yet |
+| ESP32-S3 | 6.1 (commit `fff9895c`) | The only target CI builds. v1.0.0 was verified on hardware. v2.0.0 and v2.1.0 have not run on a board yet |
 | Any other chip | | Not verified and not claimed |
 
-The manifest has no `targets` list, as in v1, so the component manager and the registry do not limit the chip. That is not a claim of support. CI builds only for ESP32-S3, and v2.0.0 has not run on any board yet, ESP32-S3 included. Other chips are not blocked, but nothing has built or run there. CI builds `examples/basic` for ESP32-S3 in the `espressif/idf:v6.1` image pinned by digest, and runs the host tests in Debug and Release with ASan and UBSan.
+The manifest has no `targets` list, as in v1, so the component manager and the registry do not limit the chip. That is not a claim of support. CI builds only for ESP32-S3, and v2.0.0 and v2.1.0 have not run on any board yet, ESP32-S3 included. Other chips are not blocked, but nothing has built or run there. CI builds `examples/basic` for ESP32-S3 in the `espressif/idf:v6.1` image pinned by digest, and runs the host tests in Debug and Release with ASan and UBSan.
 
 | Toolchain | Where it ran |
 | :--- | :--- |
@@ -54,14 +54,14 @@ flowchart LR
 - **The limit is yours.** The library has no default resolution. A consumer such as the OpenSensor firmware sets its own rule, for example resolution 8.
 - **Store only the coarse cell.** Derive any public coordinate from that cell. A cell center is not the original position.
 - **The country is declared, not derived.** `valid_country()` checks the code against the 249 assigned ISO 3166-1 alpha-2 codes. H3 is not a country lookup.
-- **Official H3, unmodified.** Uber H3 v4.5.0 lives in `vendor/h3/`. CMake checks the SHA-256 of every file listed in `vendor/h3/manifest.json` and stops when `vendor/h3/` holds a file the manifest does not list, apart from macOS `.DS_Store`.
+- **Official H3, unmodified.** Uber H3 v4.6.0 lives in `vendor/h3/`. CMake checks the SHA-256 of every file listed in `vendor/h3/manifest.json` and stops when `vendor/h3/` holds a file the manifest does not list, apart from macOS `.DS_Store`.
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant App
   participant Loc as embedded_h3::location
-  participant H3 as Uber H3 v4.5.0
+  participant H3 as Uber H3 v4.6.0
   App->>Loc: from_degrees(37.7759387, -122.4179506, 9)
   Loc->>H3: latLngToCell
   H3-->>Loc: 8928308280fffff (res 9)
@@ -85,7 +85,7 @@ dependencies:
   idf: ">=6.1"
   walkthru-earth/embedded-h3-location:
     git: "https://github.com/walkthru-earth/embedded-h3-location.git"
-    version: "v2.0.0"
+    version: "v2.1.0"
 ```
 
 ESP-IDF 6.1 compiles C++ as `gnu++26` by default. That is fine for the public header. This component compiles its own source as `gnu++23`, so an SDK default change cannot move its dialect. [`examples/basic`](examples/basic) is a minimal project.
@@ -97,7 +97,7 @@ include(FetchContent)
 FetchContent_Declare(
   embedded_h3_location
   GIT_REPOSITORY https://github.com/walkthru-earth/embedded-h3-location.git
-  GIT_TAG v2.0.0
+  GIT_TAG v2.1.0
 )
 FetchContent_MakeAvailable(embedded_h3_location)
 target_link_libraries(my_app PRIVATE walkthru_earth::embedded_h3_location)
@@ -234,9 +234,9 @@ void my_h3_free(void *p) { heap_caps_free(p); }
 }
 ```
 
-Why the hooks round zero up. H3 v4.5.0 can ask for zero bytes. For the whole globe, the 122 resolution 0 cells, `createSortableLoopSet` calls `H3_MEMORY(malloc)(sizeof(SortableLoop) * numLoops)` with `numLoops` 0 (`cellsToMultiPoly.c` line 388) and takes the globe path only later (line 525). H3 reads a NULL result as a failed allocation. C lets `malloc(0)` return NULL, and ESP-IDF 6.1 always does. `heap_caps_aligned_alloc_base` returns NULL for size 0 (`components/heap/heap_caps_base.c` lines 113-116 at `fff9895c`), and `heap_caps_malloc`, `heap_caps_calloc`, `heap_caps_realloc` with a NULL pointer, and plain `malloc` all reach it. So hooks that pass the size straight through return `OutOfMemory` for the globe. `nonzero_alloc_size` turns 0 into 1 and leaves every other size alone. The same holds with no prefix, because plain `malloc` on ESP-IDF 6.1 is `heap_caps_malloc_default` (`components/esp_libc/src/heap.c`). Set a prefix and round zero up if your app may outline the whole globe on a device.
+Why the hooks round zero up. H3 v4.6.0 can ask for zero bytes. For the whole globe, the 122 resolution 0 cells, `createSortableLoopSet` calls `H3_MEMORY(malloc)(sizeof(SortableLoop) * numLoops)` with `numLoops` 0 (`cellsToMultiPoly.c` line 388) and takes the globe path only later (line 525). H3 reads a NULL result as a failed allocation. C lets `malloc(0)` return NULL, and ESP-IDF 6.1 always does. `heap_caps_aligned_alloc_base` returns NULL for size 0 (`components/heap/heap_caps_base.c` lines 113-116 at `fff9895c`), and `heap_caps_malloc`, `heap_caps_calloc`, `heap_caps_realloc` with a NULL pointer, and plain `malloc` all reach it. So hooks that pass the size straight through return `OutOfMemory` for the globe. `nonzero_alloc_size` turns 0 into 1 and leaves every other size alone. The same holds with no prefix, because plain `malloc` on ESP-IDF 6.1 is `heap_caps_malloc_default` (`components/esp_libc/src/heap.c`). Set a prefix and round zero up if your app may outline the whole globe on a device.
 
-One caveat in H3 v4.5.0. `cellsToMultiPoly.c` line 352 calls plain `free` on a block from `H3_MEMORY(malloc)`, inside a `NEVER(err)` branch that H3 treats as unreachable. On ESP-IDF 6.1 plain `free` is `heap_caps_free` (`components/esp_libc/src/heap.c`), which takes any `heap_caps_*` block, so hooks over `heap_caps_*` are safe. Hooks over a separate pool would need that branch never to run.
+One caveat in H3 v4.6.0. `cellsToMultiPoly.c` line 352 calls plain `free` on a block from `H3_MEMORY(malloc)`, inside a `NEVER(err)` branch that H3 treats as unreachable. On ESP-IDF 6.1 plain `free` is `heap_caps_free` (`components/esp_libc/src/heap.c`), which takes any `heap_caps_*` block, so hooks over `heap_caps_*` are safe. Hooks over a separate pool would need that branch never to run.
 
 The host test `test_multipolygon` builds the library with the prefix `eh3l_test_` and a counting allocator. It fails each H3 allocation in turn, for a normal cell set and for the whole globe, which H3 builds on its own path, and checks that every one returns `OutOfMemory` with nothing left allocated. It also makes the counting allocator return NULL for zero bytes, as ESP-IDF does, and checks that the whole globe then fails with `OutOfMemory` when the hooks pass the size through and succeeds when they round it up with `nonzero_alloc_size`. For 720 cells at resolution 8 on a 64 bit host, H3 peaked at about 700 KB with 720 separate cells, 560 KB for one solid blob and 600 KB for every other cell of a disk. The largest single block was 345,600 bytes. A 32 bit device uses less, because pointers are half the size, but nothing here measured a device.
 
@@ -287,16 +287,19 @@ tools/check_h3_release.sh # warns when uber/h3 has a newer release
 
 The tests cover every `Error` value, every H3 error code mapping, the resolution and coordinate bounds, pentagons, invalid cells, coarsening monotonicity and `parent_at` against H3 `cellToParent` for every input and target resolution. For outlines they cover holes, islands, pentagons at every odd resolution, the poles, the whole globe from the 122 resolution 0 cells, every buffer limit, malformed H3 output, each failed allocation, and hundreds of random sets compared bit for bit with H3 `cellsToLinkedMultiPolygon`. `test_multipolygon` runs on a library built with a counting allocator prefix and `test_multipolygon_malloc` runs the same checks on a library that calls plain `malloc`. With `EMBEDDED_H3_LOCATION_ALLOC_PREFIX` set, the public library keeps your prefix and the tests build their own unprefixed copy. `tools/mutation_test.sh` breaks each guard in `src/location.cpp`, `src/multipolygon.cpp`, `multipolygon_capacity` and `nonzero_alloc_size` one at a time and checks that the tests fail. Maintainer rules and the H3 upgrade steps are in [`AGENTS.md`](AGENTS.md).
 
-## Upstream H3 fixes not yet released
+## Upstream H3 fixes in the vendored release
 
-The newest uber/h3 release is v4.5.0, so that is what we vendor. We never vendor `master`. The upstream changelog lists these fixes under Unreleased, checked on 2026-11-09 at master `f421dc84`.
+We vendor uber/h3 v4.6.0, the newest release, tagged on 2026-11-18 at commit `33ec6280`. We never vendor `master`. The upstream `CHANGELOG.md` at that tag lists these fixes that touch code we compile. Its Unreleased section was empty on 2026-11-21, when master was the same commit as the tag.
 
 | Fix | Upstream | Effect here |
 | :--- | :--- | :--- |
-| Latitude precision near the poles in `cellToLatLng` and `cellToBoundary` | [#1255](https://github.com/uber/h3/pull/1255) | `center_degrees` and `center_e7` call `cellToLatLng`, so centers near the poles get the fix after the next release. We have not measured the size of the change |
+| Latitude precision near the poles in `cellToLatLng` and `cellToBoundary` | [#1255](https://github.com/uber/h3/pull/1255) | `vec3ToLatLng` now takes the latitude from `atan2` in place of `asin`. `center_degrees`, `center_e7` and the outline points of `cells_to_multipolygon` go through it, so their last bits can change, most near the poles. We have not measured the size of the change |
 | Out of bounds write in `gridRing` with a negative `k` | [#1235](https://github.com/uber/h3/pull/1235) | Our API never calls `gridRing` |
 | Out of bounds read in `_baseCellToCCWrot60` when `face == NUM_ICOSA_FACES` | [#1224](https://github.com/uber/h3/pull/1224) | Only the vertex functions call it, and our API does not |
+| Signed overflow in `maxPolygonToCellsSize` and `uncompactCellsSize` | [#1204](https://github.com/uber/h3/pull/1204), [#1231](https://github.com/uber/h3/pull/1231), [#1205](https://github.com/uber/h3/pull/1205) | Our API calls neither |
 | `dirFaces` initialized in `vertexRotations` | [#1273](https://github.com/uber/h3/pull/1273) | A compiler warning fix in vertex code we do not call |
+
+H3 4.6.0 also adds `edgeToVertexes` and an internal Gosper island iterator in `iterGosper.c`, which the manifest lists and the build compiles. `mathExtensions.h` now stops the build with `#error` when `FLT_EVAL_METHOD` is not 0 or 1, that is when double math runs at extended precision. `cellsToMultiPoly.c`, `cellsToMultiPoly.h` and `alloc.h` are byte for byte the same as in v4.5.0, so the allocator notes above still hold.
 
 `tools/check_h3_release.sh` runs in CI on every pull request and fails the weekly scheduled run once a newer release exists. On a pull request it only warns, also when GitHub cannot be reached. The weekly run fails in both cases.
 
@@ -314,7 +317,7 @@ The component manifest declares `license: "CC-BY-4.0 AND Apache-2.0"` for both p
 
 | Component | Location | License | Copyright |
 | :--- | :--- | :--- | :--- |
-| [Uber H3](https://github.com/uber/h3) v4.5.0, commit `1b536c34225191ba24a75a840f634d4a48c3b206`, unmodified | `vendor/h3/` | Apache-2.0, see [`vendor/h3/LICENSE`](vendor/h3/LICENSE) and [`vendor/h3/NOTICE`](vendor/h3/NOTICE) | Copyright 2017-2021 Uber Technologies, Inc. |
+| [Uber H3](https://github.com/uber/h3) v4.6.0, commit `33ec62807261311a26eb59f8a1c95163c988efff`, unmodified | `vendor/h3/` | Apache-2.0, see [`vendor/h3/LICENSE`](vendor/h3/LICENSE) and [`vendor/h3/NOTICE`](vendor/h3/NOTICE) | Copyright 2017-2021 Uber Technologies, Inc. |
 
 A firmware image or binary that links this library contains compiled H3 code. Ship the Apache-2.0 license text and the H3 `NOTICE` file with it, next to the Walkthru.Earth attribution.
 
