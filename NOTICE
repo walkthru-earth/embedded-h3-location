@@ -12,7 +12,7 @@ Third-Party Software Notices
 -------------------------------------------------------------------------------
 
 This repository includes unmodified source files from the official Uber H3 C
-library (v4.5.0, commit 1b536c34225191ba24a75a840f634d4a48c3b206) under
+library (v4.6.0, commit 33ec62807261311a26eb59f8a1c95163c988efff) under
 `vendor/h3/`, verified by SHA-256 checksums in `vendor/h3/manifest.json`:
 
 Copyright 2017-2021 Uber Technologies, Inc.

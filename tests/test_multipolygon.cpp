@@ -535,7 +535,7 @@ void full_buffers() {
   CHECK(fails_with(result_with(0, rings, polygons), Error::PointBufferFull));
 }
 
-// Malformed H3 output, which H3 4.5.0 never returns, gives H3Failure. These
+// Malformed H3 output, which H3 4.6.0 never returns, gives H3Failure. These
 // reach detail::copy_multipolygon directly.
 void malformed_output() {
   std::array<LatLng, 3> verts{LatLng{.lat = 0.1, .lng = 0.2},

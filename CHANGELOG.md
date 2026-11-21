@@ -5,6 +5,21 @@ All notable changes to this project are listed here. The format follows
 [Semantic Versioning](https://semver.org/). The public API is
 `include/embedded_h3/location.h`.
 
+## [2.1.0] - Unreleased
+
+Not tagged yet. Only the owner tags a release.
+
+### Changed
+
+- Vendored H3 moves from v4.5.0 to v4.6.0, the newest uber/h3 release, at
+  commit `33ec62807261311a26eb59f8a1c95163c988efff`, with new hashes in
+  `vendor/h3/manifest.json`. The public API of this library does not change.
+- H3 now computes latitude with `atan2` in `vec3ToLatLng` (uber/h3 #1255), so
+  `center_degrees`, `center_e7` and outline points can differ in their last
+  bits from v2.0.0, most near the poles.
+- H3 v4.6.0 adds `iterGosper.c`. The manifest lists it and the build
+  compiles it. H3 now refuses to build when `FLT_EVAL_METHOD` is not 0 or 1.
+
 ## [2.0.0] - 2026-11-09
 
 ### Changed
@@ -105,5 +120,7 @@ All notable changes to this project are listed here. The format follows
   with SHA-256 checked vendoring, cell coarsening, cell text, centers and
   ISO 3166-1 alpha-2 validation. ESP-IDF component and CMake library.
 
+<!-- At tag time the 2.1.0 link becomes compare/v2.0.0...v2.1.0, see AGENTS.md Releases. -->
+[2.1.0]: https://github.com/walkthru-earth/embedded-h3-location/compare/v2.0.0...h3-4.6.0
 [2.0.0]: https://github.com/walkthru-earth/embedded-h3-location/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/walkthru-earth/embedded-h3-location/releases/tag/v1.0.0

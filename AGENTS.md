@@ -36,7 +36,7 @@ consumer, for example the OpenSensor firmware, never to this repo.
 ## Vendored H3
 
 - `vendor/h3/` holds unmodified files from an official uber/h3 release tag,
-  now v4.5.0. CMake checks each file against `vendor/h3/manifest.json`,
+  now v4.6.0. CMake checks each file against `vendor/h3/manifest.json`,
   stops on any unlisted file apart from `.DS_Store`, and compiles only the
   `.c` files the manifest lists.
 - Never vendor `master` or a branch, even for a known fix. Unreleased fixes
@@ -57,7 +57,7 @@ Upgrade steps.
 ## Cell outlines and the H3 allocator
 
 `cells_to_multipolygon()` in `src/multipolygon.cpp` wraps `cellsToMultiPolygon`.
-That function is internal in H3 4.5.0, declared in `cellsToMultiPoly.h` and
+That function is internal in H3 4.6.0, declared in `cellsToMultiPoly.h` and
 not in `h3api.h`. Recheck the declaration on every H3 upgrade. It allocates
 through `H3_MEMORY` (`malloc`, `calloc`, `realloc`, `free`). The wrapper
 copies the result into caller spans and frees the H3 result before it
@@ -72,7 +72,7 @@ same name. Empty means plain `malloc`. A prefix `p_` compiles H3 with
 `p_free`, which the consumer defines with C linkage. `vendor/h3/h3lib/include/alloc.h`
 joins the name with `TJOIN`, which only exists under `H3_PREFIX`, so CMake
 also passes an empty `H3_PREFIX`. CMake rejects a prefix that is not a C
-identifier. H3 4.5.0 has one raw `free()` at `cellsToMultiPoly.c:352`, on a
+identifier. H3 4.6.0 has one raw `free()` at `cellsToMultiPoly.c:352`, on a
 path it treats as unreachable. The README explains it.
 
 The tests build a second copy of the library with a counting allocator and
@@ -91,7 +91,7 @@ paths. The component manager needs the checkout folder to be named
 ## Verification status
 
 Only ESP32-S3 on ESP-IDF 6.1 (commit `fff9895c82d744c7237be8847347bdd1b07c6643`,
-the firmware pin) is built in CI. v1.0.0 ran on that board, v2.0.0 has not run
+the firmware pin) is built in CI. v1.0.0 ran on that board, v2.0.0 and v2.1.0 have not run
 on a board yet. `idf_component.yml` has no `targets` list, as in v1, by owner
 decision. Keep the README saying plainly that this is not a claim of support. Do not claim C3, C6, P4 or any other chip in
 docs, the manifest or CI until a board of that chip has a dated bench record.

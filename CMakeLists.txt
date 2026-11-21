@@ -81,7 +81,7 @@ set(embedded_h3_location_sources "src/location.cpp" "src/multipolygon.cpp"
 # and free. A prefix such as my_h3_ makes H3 call my_h3_malloc, my_h3_calloc,
 # my_h3_realloc and my_h3_free, which the consumer defines with C linkage and
 # libc semantics. alloc.h joins the names with TJOIN, which h3api.h defines
-# only under H3_PREFIX, so H3_PREFIX is set empty, as the upstream H3 v4.5.0
+# only under H3_PREFIX, so H3_PREFIX is set empty, as the upstream H3 v4.6.0
 # CMakeLists.txt always does. Exported names stay unprefixed. Compile
 # definitions only, no vendored byte changes. ESP-IDF builds read the prefix
 # from Kconfig, host builds from the EMBEDDED_H3_LOCATION_ALLOC_PREFIX cache
@@ -152,7 +152,7 @@ if(ESP_PLATFORM)
     # this component's C++ only. H3 keeps the SDK C dialect.
     target_compile_options(${COMPONENT_LIB} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-std=gnu++23>")
 else()
-    project(embedded_h3_location VERSION 2.0.0 LANGUAGES C CXX)
+    project(embedded_h3_location VERSION 2.1.0 LANGUAGES C CXX)
 
     # One release number in four places. The public header macros, this
     # project() call, version in idf_component.yml and the newest heading in
